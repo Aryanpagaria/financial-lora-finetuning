@@ -10,5 +10,14 @@ venv/
 .vscode/
 .idea/
 
-# Hugging Face cache
-.cache/
+# Logs
+logs/
+
+# Artifacts
+artifacts/
+
+# Environment
+.env
+
+# Jupyter
+.ipynb_checkpoints/

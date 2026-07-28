@@ -1,0 +1,11 @@
+model:
+  name: "Qwen/Qwen2.5-3B-Instruct"
+
+tokenizer:
+  padding_side: "right"
+
+training:
+  max_seq_length: 2048
+
+generation:
+  max_new_tokens: 256

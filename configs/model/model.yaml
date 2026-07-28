@@ -4,8 +4,8 @@ model:
 tokenizer:
   padding_side: "right"
 
-training:
-  max_seq_length: 2048
-
-generation:
-  max_new_tokens: 256
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  bias: "none"

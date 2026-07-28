@@ -2,18 +2,8 @@ from typing import Any
 from src.data.preprocessing import get_preprocessed_dataset
 import yaml
 from transformers import AutoTokenizer, PreTrainedTokenizer
+from src.utils.config_loader import load_configs
 
-CONFIG_PATH = "configs/model/model.yaml"
-
-
-def _load_model_config() -> dict[str, Any]:
-    """Load model configuration from YAML."""
-
-    with open(CONFIG_PATH, "r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-
-    return config
 
 
 def _configure_tokenizer(config: dict[str, Any]) -> PreTrainedTokenizer:
@@ -34,7 +24,7 @@ def _configure_tokenizer(config: dict[str, Any]) -> PreTrainedTokenizer:
 def get_tokenizer() -> PreTrainedTokenizer:
     """Return a configured tokenizer."""
 
-    config = _load_model_config()
+    config = load_configs()
 
     tokenizer = _configure_tokenizer(config)
 
@@ -98,7 +88,7 @@ def _tokenize_split(
 def get_tokenized_dataset() -> dict[str, list[dict[str, Any]]]:
     """Return the tokenized dataset."""
 
-    config = _load_model_config()
+    config = load_configs()
 
     tokenizer = get_tokenizer()
 

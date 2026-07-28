@@ -21,3 +21,13 @@ artifacts/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Dataset
+data/raw/*
+data/processed/*
+data/interim/*
+
+# Keep folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/interim/.gitkeep

@@ -98,25 +98,25 @@ def print_trainable_parameters(model: Any) -> None:
 def get_model() -> Any:
     """Return the LoRA-enabled language model."""
 
-    print("Loading base model...")
+    
     model = _load_model()
 
-    print("Preparing model...")
+
     model = _prepare_model(model)
 
-    print("Creating LoRA config...")
+    
     lora_config = _create_lora_config()
 
-    print("Applying LoRA...")
+
     model = _apply_lora(
         model,
         lora_config,
     )
 
-    print("Printing trainable parameters...")
+    
     print_trainable_parameters(model)
 
-    print("Returning model...")
+
     return model
 
 

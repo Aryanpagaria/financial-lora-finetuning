@@ -64,32 +64,32 @@ def move_batch_to_device(batch: dict,device: torch.device,) -> dict:
 def load_training_components():
     """Load all components required for training."""
 
-    print("1. Getting device...")
+    
     device = get_device()
 
-    print("2. Loading dataloaders...")
+    
     dataloaders = get_dataloaders()
 
-    print("3. Loading dataloaders...")
+    
     train_dataloader = dataloaders["train"]
     validation_dataloader = dataloaders["validation"]
 
-    print("4. Loading model...")
+    
     model = get_model()
 
-    print("4. Moving model to device...")
+    print("
     model.to(device)
 
-    print("5. Creating optimizer...")
+    
     optimizer = create_optimizer(model)
 
-    print("6. Creating scheduler...")
+    
     scheduler = create_scheduler(
         optimizer,
         train_dataloader,
     )
 
-    print("7. Components ready!")
+    
 
     return (
         device,

@@ -62,16 +62,16 @@ def load_checkpoint(
 
     if not resume_config["enabled"]:
 
-    print("Starting training from scratch.")
+        print("Starting training from scratch.")
 
-    return {
-    "model": model,
-    "optimizer": optimizer,
-    "scheduler": scheduler,
-    "start_epoch": checkpoint["epoch"],
-    "global_step": checkpoint["global_step"],
-    "best_loss": checkpoint["loss"],
-    }
+        return {
+            "model": model,
+            "optimizer": optimizer,
+            "scheduler": scheduler,
+            "start_epoch": 0,
+            "global_step": 0,
+            "best_loss": float("inf"),
+        }
 
     checkpoint_path = resume_config["path"]
 
@@ -99,11 +99,12 @@ def load_checkpoint(
     )
 
     print(f"Loaded checkpoint: {checkpoint_path}")
+
     return {
-    "model": model,
-    "optimizer": optimizer,
-    "scheduler": scheduler,
-    "start_epoch": checkpoint["epoch"],
-    "global_step": checkpoint["global_step"],
-    "best_loss": checkpoint["loss"],
-}
+        "model": model,
+        "optimizer": optimizer,
+        "scheduler": scheduler,
+        "start_epoch": checkpoint["epoch"],
+        "global_step": checkpoint["global_step"],
+        "best_loss": checkpoint["loss"],
+    }

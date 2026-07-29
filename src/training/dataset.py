@@ -3,7 +3,6 @@ from src.utils.config_loader import load_configs
 import torch
 import yaml
 from torch.utils.data import DataLoader, Dataset
-
 from src.training.tokenizer import get_tokenized_dataset
 
 class FinancialDataset(Dataset):
@@ -61,34 +60,34 @@ def get_dataloaders() -> dict[str, DataLoader]:
     batch_size = config["training"]["batch_size"]
 
     train_dataset = FinancialDataset(
-        tokenized_dataset["train"]
-    )
+    tokenized_dataset["train"][:100]
+)
 
     validation_dataset = FinancialDataset(
-        tokenized_dataset["validation"]
-    )
+    tokenized_dataset["validation"][:20]
+)
 
     test_dataset = FinancialDataset(
         tokenized_dataset["test"]
     )
 
     return {
-        "train": create_dataloader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-        ),
-        "validation": create_dataloader(
-            validation_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-        ),
-        "test": create_dataloader(
-            test_dataset,
-            batch_size=batch_size,
-            shuffle=False,
-        ),
-    }
+    "train": create_dataloader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+    ),
+    "validation": create_dataloader(
+        validation_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    ),
+    "test": create_dataloader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    ),
+}
 
 
 if __name__ == "__main__":

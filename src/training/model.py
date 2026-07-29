@@ -1,29 +1,32 @@
+from typing import Any
+
 from peft import (
     LoraConfig,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
 
-from transformers import (
-    AutoModelForCausalLM,
-)
+from transformers import AutoModelForCausalLM
 
 from src.utils.config_loader import load_configs
 
 
 def _load_model() -> Any:
-    """Load the base causal language model."""
-
     config = load_configs()
 
     model_name = config["model"]["name"]
 
+    print("Before from_pretrained()")
+
     model = AutoModelForCausalLM.from_pretrained(
-    pretrained_model_name_or_path=model_name,
-    trust_remote_code=True,
+        pretrained_model_name_or_path=model_name,
+        trust_remote_code=True,
     )
 
+    print("After from_pretrained()")
+
     return model
+
 
 def _prepare_model(model: Any) -> Any:
     """Prepare the model for parameter-efficient fine-tuning."""
@@ -95,21 +98,27 @@ def print_trainable_parameters(model: Any) -> None:
 def get_model() -> Any:
     """Return the LoRA-enabled language model."""
 
+    print("Loading base model...")
     model = _load_model()
 
+    print("Preparing model...")
     model = _prepare_model(model)
 
+    print("Creating LoRA config...")
     lora_config = _create_lora_config()
 
+    print("Applying LoRA...")
     model = _apply_lora(
         model,
         lora_config,
     )
 
+    print("Printing trainable parameters...")
+    print_trainable_parameters(model)
+
+    print("Returning model...")
     return model
 
+
 if __name__ == "__main__":
-
     model = get_model()
-
-    print_trainable_parameters(model)

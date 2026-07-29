@@ -1,45 +1,37 @@
 # Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 
-# Virtual environments
-.venv/
+# Virtual Environment
 venv/
+.venv/
 
-# IDE
-.vscode/
-.idea/
+# Checkpoints
+artifacts/
+checkpoints/
 
 # Logs
 logs/
 
-# Artifacts
-artifacts/cache/
+# W&B
+wandb/
 
-# Environment
+# VS Code
+.vscode/
+
+# Dataset cache
+.cache/
+
+# HuggingFace cache
+hf_cache/
+
+# Environment variables
 .env
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Dataset
-data/raw/*
-data/processed/*
-data/interim/*
-
-# Keep folder structure
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/interim/.gitkeep
-
-logs/
-
-*.ckpt
-*.pt
-*.bin
-*.safetensors
-
+# OS files
 .DS_Store
-.ipynb_checkpoints/
-
-data/raw/
+Thumbs.db

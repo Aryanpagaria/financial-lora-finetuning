@@ -1,11 +1,26 @@
 model:
   name: "Qwen/Qwen2.5-3B-Instruct"
 
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_use_double_quant: true
+
 tokenizer:
   padding_side: "right"
+
+peft:
+  method: "lora"
 
 lora:
   r: 16
   alpha: 32
   dropout: 0.05
   bias: "none"
+
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj

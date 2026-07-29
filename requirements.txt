@@ -27,7 +27,7 @@ seaborn>=0.13.0
 jupyter>=1.1.1
 ipykernel>=6.29.5
 
-
+wandb>=0.22.0
 transformers>=4.46
 datasets>=3.0
 accelerate>=1.0

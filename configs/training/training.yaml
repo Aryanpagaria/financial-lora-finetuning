@@ -4,9 +4,53 @@ training:
   learning_rate: 2e-4
   max_seq_length: 2048
 
+  random_seed: 42
+
   gradient_accumulation_steps: 1
   weight_decay: 0.01
   warmup_ratio: 0.03
 
   fp16: false
   bf16: false
+
+checkpoint:
+  output_dir: "artifacts/checkpoints"
+  save_every_epoch: true
+  save_total_limit: 3
+  resume_from_checkpoint: false
+  save_directory: artifacts/checkpoints
+  file_name: checkpoint.pt
+
+  resume:
+    enabled: false
+    path: "artifacts/checkpoints/checkpoint.pt"
+
+optimizer:
+  name: "adamw"
+
+early_stopping:
+  enabled: true
+  patience: 3
+  min_delta: 0.001
+
+
+wandb:
+  enabled: true
+
+  project: financial-lora-finetuning
+
+  run_name: qwen-lora-finqa
+
+  tags:
+    - LoRA
+    - FinQA
+
+  notes: Initial training run
+
+logging:
+  level: "INFO"
+  log_directory: "artifacts/logs"
+  file_name: "training.log"
+
+scheduler:
+  name: "linear"

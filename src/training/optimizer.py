@@ -25,8 +25,13 @@ def get_optimizer(
         .lower()
     )
 
-    learning_rate = config["training"]["learning_rate"]
-    weight_decay = config["training"]["weight_decay"]
+    learning_rate = float(
+        config["training"]["learning_rate"]
+    )
+
+    weight_decay = float(
+        config["training"]["weight_decay"]
+    )
 
     trainable_parameters = filter(
         lambda parameter: parameter.requires_grad,
@@ -41,7 +46,7 @@ def get_optimizer(
             weight_decay=weight_decay,
         )
 
-    if optimizer_name == "adam":
+    elif optimizer_name == "adam":
 
         return torch.optim.Adam(
             params=trainable_parameters,
@@ -49,7 +54,7 @@ def get_optimizer(
             weight_decay=weight_decay,
         )
 
-    if optimizer_name == "sgd":
+    elif optimizer_name == "sgd":
 
         return torch.optim.SGD(
             params=trainable_parameters,
@@ -75,8 +80,12 @@ def print_optimizer_info() -> None:
     print("=" * 80)
 
     print(f"Optimizer     : {config['optimizer']['name']}")
-    print(f"Learning Rate : {config['training']['learning_rate']}")
-    print(f"Weight Decay  : {config['training']['weight_decay']}")
+    print(
+        f"Learning Rate : {float(config['training']['learning_rate'])}"
+    )
+    print(
+        f"Weight Decay  : {float(config['training']['weight_decay'])}"
+    )
 
     print("=" * 80)
 

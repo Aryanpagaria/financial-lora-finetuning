@@ -1,4 +1,14 @@
+"""
+Entry point for training the LoRA model.
+"""
+
 from src.training.trainer import train
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """Start the training pipeline."""
     train()
+
+
+if __name__ == "__main__":
+    main()

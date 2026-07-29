@@ -25,7 +25,7 @@ def _load_model() -> Any:
 
     print("After from_pretrained()")
 
-    return model
+    return model    
 
 
 def _prepare_model(model: Any) -> Any:

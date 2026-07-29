@@ -14,7 +14,7 @@ venv/
 logs/
 
 # Artifacts
-artifacts/
+artifacts/cache/
 
 # Environment
 .env
@@ -31,3 +31,15 @@ data/interim/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/interim/.gitkeep
+
+logs/
+
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+
+.DS_Store
+.ipynb_checkpoints/
+
+data/raw/

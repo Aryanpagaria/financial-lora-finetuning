@@ -24,7 +24,7 @@ def get_lr_scheduler(
         .lower()
     )
 
-    warmup_ratio = config["scheduler"]["warmup_ratio"]
+    warmup_ratio = config["training"]["warmup_ratio"]
 
     warmup_steps = int(
         warmup_ratio * num_training_steps
@@ -49,7 +49,7 @@ def print_scheduler_info(
 
     config = load_configs()
 
-    warmup_ratio = config["scheduler"]["warmup_ratio"]
+    warmup_ratio = config["training"]["warmup_ratio"]
 
     warmup_steps = int(
         warmup_ratio * num_training_steps

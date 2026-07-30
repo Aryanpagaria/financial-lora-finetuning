@@ -242,13 +242,13 @@ def train() -> None:
         )
 
         save_checkpoint(
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch + 1,
-            global_step=global_step,
-            loss=validation_loss,
-        )
+    model=model,
+    optimizer=optimizer,
+    scheduler=scheduler,
+    epoch=epoch + 1,
+    global_step=global_step,
+    best_validation_loss=validation_loss,
+)
 
         current_learning_rate = scheduler.get_last_lr()[0]
 

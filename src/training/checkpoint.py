@@ -10,7 +10,7 @@ def save_checkpoint(
     scheduler,
     epoch: int,
     global_step: int,
-    loss: float,
+    best_validation_los: float,
 ) -> None:
     """
     Save a training checkpoint.
@@ -31,7 +31,7 @@ def save_checkpoint(
     checkpoint = {
         "epoch": epoch,
         "global_step": global_step,
-        "loss": loss,
+        "best_validation_loss": best_validation_loss,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
@@ -106,5 +106,5 @@ def load_checkpoint(
         "scheduler": scheduler,
         "start_epoch": checkpoint["epoch"],
         "global_step": checkpoint["global_step"],
-        "best_loss": checkpoint["loss"],
+        "best_loss": checkpoint["best_validation_los"],
     }

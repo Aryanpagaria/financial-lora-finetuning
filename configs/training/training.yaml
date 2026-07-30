@@ -1,17 +1,18 @@
 training:
-  batch_size: 4
+  batch_size: 1
   epochs: 3
 
   learning_rate: 0.0002
   weight_decay: 0.01
 
-  max_seq_length: 2048
+  max_seq_length: 512
+  gradient_checkpointing: true
   random_seed: 42
 
   gradient_accumulation_steps: 1
   warmup_ratio: 0.03
 
-  fp16: false
+  fp16: true
   bf16: false
 
 checkpoint:

@@ -29,6 +29,13 @@ hf_cache/
 # Environment variables
 .env
 
+artifacts/
+wandb/
+__pycache__/
+*.pt
+*.bin
+*.safetensors
+
 # Jupyter
 .ipynb_checkpoints/
 

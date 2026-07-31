@@ -178,13 +178,7 @@ def train_one_epoch(
                 if parameter.grad is not None
             )
 
-            print(
-                f"Trainable Parameters : {len(trainable_parameters)}"
-            )
-
-            print(
-                f"Parameters with Grad : {trainable_with_grad}"
-            )
+            
 
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 trainable_parameters,

@@ -11,7 +11,8 @@ checkpoint:
 
   # Save the best model based on validation loss
   save_best: true
-
+  # Directory for LoRA adapter export
+  lora_export_directory: artifacts/lora_adapter
   # Directory for the best checkpoint
   best_model_directory: artifacts/best_model
 

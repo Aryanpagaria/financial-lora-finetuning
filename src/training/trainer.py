@@ -1,5 +1,5 @@
 from typing import Any
-
+from src.training.tokenizer import get_tokenizer
 import torch
 from tqdm import tqdm
 from src.evaluation.evaluator import evaluate
@@ -16,6 +16,9 @@ from src.training.scheduler import (
 from src.training.checkpoint import (
     save_checkpoint,
     load_checkpoint,
+    save_best_checkpoint,
+    export_lora_adapter,
+    cleanup_old_checkpoints,
 )
 
 from src.utils.config_loader import load_configs
@@ -67,6 +70,7 @@ def load_training_components():
 
     train_dataloader = dataloaders["train"]
     validation_dataloader = dataloaders["validation"]
+    tokenizer = get_tokenizer()
 
     model = get_model()
 
@@ -98,10 +102,11 @@ def load_training_components():
         device,
         train_dataloader,
         validation_dataloader,
+        tokenizer,
         model,
-        optimizer,
-        scheduler,
-    )
+    optimizer,
+    scheduler,
+)
 
 
 
@@ -112,22 +117,34 @@ def train_one_epoch(
     optimizer: Any,
     scheduler: Any,
     device: torch.device,
-) -> float:
+) -> tuple[float, float]:
     """
     Train the model for one epoch.
     """
 
     model.train()
 
+    config = load_configs()
+
+    gradient_accumulation_steps = (
+        config["training"]["gradient_accumulation_steps"]
+    )
+
     total_loss = 0.0
+    total_gradient_norm = 0.0
 
     progress_bar = tqdm(
         train_dataloader,
         desc="Training",
         leave=False,
     )
+
     optimizer.zero_grad()
-    for batch in progress_bar:
+
+    for step, batch in enumerate(
+        progress_bar,
+        start=1,
+    ):
 
         batch = move_batch_to_device(
             batch=batch,
@@ -136,41 +153,67 @@ def train_one_epoch(
 
         outputs = model(**batch)
 
-        loss = outputs.loss
+        loss = (
+            outputs.loss
+            / gradient_accumulation_steps
+        )
 
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(
-            model.parameters(),
-            max_norm=1.0,
+        if (
+            step % gradient_accumulation_steps == 0
+            or step == len(train_dataloader)
+        ):
+
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=1.0,
+            )
+
+            total_gradient_norm += gradient_norm.item()
+
+            optimizer.step()
+
+            scheduler.step()
+
+            optimizer.zero_grad()
+
+        total_loss += (
+            loss.item()
+            * gradient_accumulation_steps
         )
-
-        optimizer.step()
-
-        scheduler.step()
-
-        optimizer.zero_grad()
-
-        total_loss += loss.item()
 
         progress_bar.set_postfix(
             {
-                "loss": f"{loss.item():.4f}"
+                "loss": (
+                    f"{loss.item() * gradient_accumulation_steps:.4f}"
+                ),
+                "lr": (
+                    f"{scheduler.get_last_lr()[0]:.2e}"
+                ),
             }
         )
 
     average_loss = (
-        total_loss /
-        len(train_dataloader)
+        total_loss
+        / len(train_dataloader)
     )
 
-    return average_loss
+    average_gradient_norm = (
+        total_gradient_norm
+        / max(
+            1,
+            len(train_dataloader)
+            // gradient_accumulation_steps,
+        )
+    )
 
+    return (
+        average_loss,
+        average_gradient_norm,
+    )
 
-
-
-
-def train() -> None:
+def train() -> dict:
     """
     Train the LoRA model.
     """
@@ -183,6 +226,7 @@ def train() -> None:
         device,
         train_dataloader,
         validation_dataloader,
+        tokenizer,
         model,
         optimizer,
         scheduler,
@@ -215,12 +259,15 @@ def train() -> None:
         print(f"Epoch {epoch + 1}/{epochs}")
         print("=" * 80)
 
-        train_loss = train_one_epoch(
-            model=model,
-            train_dataloader=train_dataloader,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            device=device,
+        (
+            train_loss,
+            gradient_norm,
+        ) = train_one_epoch(
+        model=model,
+        train_dataloader=train_dataloader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        device=device,
         )
 
         evaluation_metrics = evaluate(
@@ -230,6 +277,13 @@ def train() -> None:
         )
 
         validation_loss = evaluation_metrics["loss"]
+        if validation_loss < best_loss:
+            best_loss = validation_loss
+
+            save_best_checkpoint(
+                model=model,
+                validation_loss=validation_loss,
+            )
 
         global_step += len(train_dataloader)
 
@@ -238,17 +292,22 @@ def train() -> None:
         )
 
         print(
+            f"Gradient Norm   : {gradient_norm:.4f}"
+        )
+
+        print(
             f"Validation Loss : {validation_loss:.4f}"
         )
 
         save_checkpoint(
-    model=model,
-    optimizer=optimizer,
-    scheduler=scheduler,
-    epoch=epoch + 1,
-    global_step=global_step,
-    best_validation_loss=validation_loss,
-)
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch + 1,
+            global_step=global_step,
+            best_validation_loss=best_loss,
+        )
+        cleanup_old_checkpoints()
 
         current_learning_rate = scheduler.get_last_lr()[0]
 
@@ -257,6 +316,7 @@ def train() -> None:
             train_loss=train_loss,
             validation_loss=validation_loss,
             learning_rate=current_learning_rate,
+            gradient_norm=gradient_norm,
         )
 
         should_stop = early_stopping.update(
@@ -268,7 +328,23 @@ def train() -> None:
             print("\nEarly stopping triggered.")
 
             break
-
+    export_lora_adapter(
+        model=model,
+        tokenizer=tokenizer,
+    )
+    print("=" * 80)
+    print("TRAINING SUMMARY")
+    print("=" * 80)
+    print(f"Best Validation Loss : {best_loss:.6f}")
+    print(f"Completed Epochs     : {epoch + 1}")
+    print(f"Global Steps         : {global_step}")
+    print("=" * 80)
     finish_wandb()
 
     print("\nTraining Finished Successfully.")
+    
+    return {
+        "best_validation_loss": best_loss,
+        "global_step": global_step,
+        "epochs_completed": epoch + 1,
+    }

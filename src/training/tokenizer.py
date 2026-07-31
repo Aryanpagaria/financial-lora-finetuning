@@ -3,7 +3,7 @@ from src.data.preprocessing import get_preprocessed_dataset
 import yaml
 from transformers import AutoTokenizer, PreTrainedTokenizer
 from src.utils.config_loader import load_configs
-
+import os 
 
 
 def _configure_tokenizer(config: dict[str, Any]) -> PreTrainedTokenizer:
@@ -130,3 +130,149 @@ if __name__ == "__main__":
 
     print("Labels:")
     print(sample["labels"][:20])
+
+
+def print_tokenizer_info(
+    tokenizer: PreTrainedTokenizer,
+) -> None:
+    """
+    Print tokenizer configuration.
+    """
+
+    print("=" * 80)
+    print("TOKENIZER INFORMATION")
+    print("=" * 80)
+
+    print(
+        f"Tokenizer Class : {tokenizer.__class__.__name__}"
+    )
+
+    print(
+        f"Vocabulary Size : {len(tokenizer)}"
+    )
+
+    print(
+        f"Padding Side    : {tokenizer.padding_side}"
+    )
+
+    print(
+        f"Pad Token       : {tokenizer.pad_token}"
+    )
+
+    print(
+        f"EOS Token       : {tokenizer.eos_token}"
+    )
+
+    print(
+        f"BOS Token       : {tokenizer.bos_token}"
+    )
+
+    print(
+        f"UNK Token       : {tokenizer.unk_token}"
+    )
+
+    print(
+        f"Model Max Length: {tokenizer.model_max_length}"
+    )
+
+    print("=" * 80)
+
+def sanity_check_tokenizer(
+    tokenizer: PreTrainedTokenizer,
+) -> None:
+    """
+    Validate tokenizer configuration before
+    training.
+    """
+
+    if tokenizer.pad_token is None:
+
+        raise RuntimeError(
+            "Pad token is missing."
+        )
+
+    if tokenizer.eos_token is None:
+
+        raise RuntimeError(
+            "EOS token is missing."
+        )
+
+    if len(tokenizer) == 0:
+
+        raise RuntimeError(
+            "Tokenizer vocabulary is empty."
+        )
+
+    print("=" * 80)
+    print("TOKENIZER SANITY CHECK PASSED")
+    print("=" * 80)
+
+def save_tokenizer(
+    tokenizer: PreTrainedTokenizer,
+) -> None:
+    """
+    Save tokenizer for inference.
+    """
+
+    config = load_configs()
+
+    save_directory = (
+        config["checkpoint"][
+            "lora_export_directory"
+        ]
+    )
+
+    os.makedirs(
+        save_directory,
+        exist_ok=True,
+    )
+
+    tokenizer.save_pretrained(
+        save_directory,
+    )
+
+    print(
+        f"\nTokenizer saved to:\n{save_directory}"
+    )
+
+def load_saved_tokenizer(
+) -> PreTrainedTokenizer:
+    """
+    Load exported tokenizer.
+    """
+
+    config = load_configs()
+
+    save_directory = (
+        config["checkpoint"][
+            "lora_export_directory"
+        ]
+    )
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        save_directory,
+    )
+
+    return tokenizer
+
+
+def get_tokenizer() -> PreTrainedTokenizer:
+    """
+    Return a configured tokenizer.
+    """
+
+    config = load_configs()
+
+    tokenizer = _configure_tokenizer(
+        config,
+    )
+
+    sanity_check_tokenizer(
+        tokenizer,
+    )
+
+    print_tokenizer_info(
+        tokenizer,
+    )
+
+    return tokenizer

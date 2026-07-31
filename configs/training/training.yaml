@@ -9,7 +9,7 @@ training:
   gradient_checkpointing: true
   random_seed: 42
 
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 4
   warmup_ratio: 0.03
 
   fp16: true

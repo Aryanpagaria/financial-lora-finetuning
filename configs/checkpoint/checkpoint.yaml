@@ -3,26 +3,25 @@ checkpoint:
   # Directory where training checkpoints are stored
   save_directory: artifacts/checkpoints
 
-  # Name of the latest checkpoint
+  # Latest checkpoint filename
   file_name: latest.pt
 
-  # Save checkpoint every N epochs
+  # Save every N epochs
   save_every: 1
 
-  # Save the best model based on validation loss
+  # Keep only the latest N checkpoints
+  save_total_limit: 5
+
+  # Save the best LoRA adapter
   save_best: true
-  # Directory for LoRA adapter export
-  lora_export_directory: artifacts/lora_adapter
-  # Directory for the best checkpoint
+
+  # Directory for best model
   best_model_directory: artifacts/best_model
 
-  # Directory for LoRA adapter export
-  adapter_directory: artifacts/lora_adapter
+  # Directory for exported LoRA adapter
+  lora_export_directory: artifacts/lora_adapter
 
-  # Maximum number of checkpoints to keep
-  max_checkpoints: 5
-
-  # Resume training settings
+  # Resume training
   resume:
 
     enabled: false

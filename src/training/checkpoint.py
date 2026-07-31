@@ -246,7 +246,7 @@ def print_checkpoint_info(
 def cleanup_old_checkpoints() -> None:
     """
     Remove old checkpoints while keeping
-    the newest checkpoint files.
+    only the most recent checkpoint files.
     """
 
     config = load_configs()
@@ -254,6 +254,11 @@ def cleanup_old_checkpoints() -> None:
     checkpoint_directory = (
         config["checkpoint"]["save_directory"]
     )
+
+    if not os.path.exists(
+        checkpoint_directory,
+    ):
+        return
 
     keep_last = (
         config["checkpoint"]["save_total_limit"]
@@ -269,11 +274,6 @@ def cleanup_old_checkpoints() -> None:
         for file_name in os.listdir(
             checkpoint_directory,
         )
-
-        if not os.path.exists(
-            checkpoint_directory,
-        ):
-    return
 
         if file_name.endswith(".pt")
     ]

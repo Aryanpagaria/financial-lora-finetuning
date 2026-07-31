@@ -165,10 +165,33 @@ def train_one_epoch(
             or step == len(train_dataloader)
         ):
 
-            gradient_norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(),
-                max_norm=1.0,
+            trainable_parameters = list(
+                filter(
+                    lambda parameter: parameter.requires_grad,
+                    model.parameters(),
+                )
             )
+
+            trainable_with_grad = sum(
+                1
+                for parameter in trainable_parameters
+                if parameter.grad is not None
+            )
+
+            print(
+                f"Trainable Parameters : {len(trainable_parameters)}"
+            )
+
+            print(
+                f"Parameters with Grad : {trainable_with_grad}"
+            )
+
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                trainable_parameters,
+                max_norm=1.0,
+            )           
+
+            total_gradient_norm += gradient_norm.item()
 
             total_gradient_norm += gradient_norm.item()
 

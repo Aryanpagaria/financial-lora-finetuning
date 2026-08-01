@@ -13,14 +13,28 @@ def move_batch_to_device(
     device: torch.device,
 ) -> dict:
     """
-    Move a batch to the selected device.
+    Move every tensor in a batch to the target device.
     """
 
-    return {
-        key: value.to(device)
-        for key, value in batch.items()
-    }
+    moved_batch = {}
 
+    for key, value in batch.items():
+
+        if isinstance(
+            value,
+            torch.Tensor,
+        ):
+
+            moved_batch[key] = value.to(
+                device,
+                non_blocking=True,
+            )
+
+        else:
+
+            moved_batch[key] = value
+
+    return moved_batch
 
 def evaluate(
     model: Any,
@@ -28,20 +42,27 @@ def evaluate(
     device: torch.device,
 ) -> dict:
     """
-    Evaluate the model and return evaluation metrics.
+    Evaluate the model.
     """
+
+    if len(dataloader) == 0:
+
+        raise RuntimeError(
+            "Evaluation dataloader is empty."
+        )
 
     model.eval()
 
     total_loss = 0.0
 
-    with torch.no_grad():
+    progress_bar = tqdm(
+        dataloader,
+        desc="Evaluation",
+        leave=False,
+        dynamic_ncols=True,
+    )
 
-        progress_bar = tqdm(
-            dataloader,
-            desc="Evaluation",
-            leave=False,
-        )
+    with torch.no_grad():
 
         for batch in progress_bar:
 
@@ -50,7 +71,9 @@ def evaluate(
                 device=device,
             )
 
-            outputs = model(**batch)
+            outputs = model(
+                **batch,
+            )
 
             loss = outputs.loss
 
@@ -58,17 +81,34 @@ def evaluate(
 
             progress_bar.set_postfix(
                 {
-                    "loss": f"{loss.item():.4f}"
+                    "loss": f"{loss.item():.4f}",
                 }
             )
 
     average_loss = (
-        total_loss /
-        len(dataloader)
+        total_loss
+        / len(dataloader)
     )
 
-    metrics = {
+    model.train()
+
+    return {
         "loss": average_loss,
     }
 
-    return metrics
+
+def print_evaluation_summary(
+    metrics: dict,
+) -> None:
+    """
+    Display evaluation metrics.
+    """
+
+    print("=" * 80)
+    print("EVALUATION SUMMARY")
+    print("=" * 80)
+    print(
+        f"Validation Loss : "
+        f"{metrics['loss']:.6f}"
+    )
+    print("=" * 80)

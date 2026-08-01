@@ -17,6 +17,15 @@ def initialize_wandb() -> None:
     wandb_config = config["wandb"]
 
     if not wandb_config["enabled"]:
+
+        print("W&B is disabled.")
+
+        return
+
+    if wandb.run is not None:
+
+        print("W&B run already exists.")
+
         return
 
     wandb.init(
@@ -36,11 +45,26 @@ def log_metrics(
     validation_loss: float,
     learning_rate: float,
     gradient_norm: float,
+    global_step: int,
 ) -> None:
+    """
+    Log training metrics to W&B.
+    """
+
+    config = load_configs()
+
+    if not config["wandb"]["enabled"]:
+
+        return
+
+    if wandb.run is None:
+
+        return
 
     wandb.log(
         {
             "epoch": epoch,
+            "global_step": global_step,
             "train_loss": train_loss,
             "validation_loss": validation_loss,
             "learning_rate": learning_rate,
@@ -48,15 +72,19 @@ def log_metrics(
         }
     )
 
-
 def finish_wandb() -> None:
     """
-    Finish the W&B run.
+    Finish the current W&B run.
     """
 
     config = load_configs()
 
     if not config["wandb"]["enabled"]:
+
+        return
+
+    if wandb.run is None:
+
         return
 
     wandb.finish()

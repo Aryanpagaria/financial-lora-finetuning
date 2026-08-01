@@ -90,12 +90,24 @@ def _load_model(
 
     return model
 
-def _prepare_model(model: Any) -> Any:
+def enable_training_optimizations(
+    model: Any,
+) -> Any:
     """
-    Prepare the model for PEFT training.
+    Enable training optimizations.
     """
 
-    model = prepare_model_for_kbit_training(model)
+    model.config.use_cache = False
+
+    model.gradient_checkpointing_enable(
+        gradient_checkpointing_kwargs={
+            "use_reentrant": False,
+        }
+    )
+
+    model.enable_input_require_grads()
+
+    model.train()
 
     return model
 
@@ -207,7 +219,12 @@ def get_model() -> Any:
         model,
     )
 
+
     print_trainable_parameters(
+        model,
+    )
+
+    print_model_memory(
         model,
     )
 
@@ -234,8 +251,61 @@ def print_model_summary(
     print(f"LoRA Alpha      : {config['lora']['alpha']}")
     print(f"LoRA Dropout    : {config['lora']['dropout']}")
     print(f"Device          : {next(model.parameters()).device}")
+    print(
+        f"Gradient Checkpointing : "
+        f"{model.is_gradient_checkpointing}"
+    )
     print("=" * 80)
 
+
+def _prepare_model(
+    model: Any,
+) -> Any:
+    """
+    Prepare the model for QLoRA training.
+    """
+
+    model = prepare_model_for_kbit_training(
+        model,
+        use_gradient_checkpointing=True,
+    )
+
+    return model
+
+def print_model_memory(
+    model: Any,
+) -> None:
+    """
+    Print model memory footprint.
+    """
+
+    memory = (
+        model.get_memory_footprint()
+        / 1024**3
+    )
+
+    print("=" * 80)
+    print("MODEL MEMORY")
+    print("=" * 80)
+    print(
+        f"Memory Footprint : "
+        f"{memory:.2f} GB"
+    )
+    print("=" * 80)
+
+
+def freeze_base_model(
+    model: Any,
+) -> None:
+    """
+    Ensure only LoRA parameters remain trainable.
+    """
+
+    for name, parameter in model.named_parameters():
+
+        if "lora" not in name.lower():
+
+            parameter.requires_grad = False
 
 def configure_model(
     model: Any,
@@ -267,17 +337,18 @@ def sanity_check_model(
     model: Any,
 ) -> None:
     """
-    Verify that the model is correctly configured
-    before training begins.
+    Verify the model before training.
     """
 
-    # Check LoRA adapters.
-    if not hasattr(model, "peft_config"):
+    if not hasattr(
+        model,
+        "peft_config",
+    ):
+
         raise RuntimeError(
-            "LoRA adapters were not attached to the model."
+            "LoRA adapters missing."
         )
 
-    # Check trainable parameters.
     trainable_parameters = sum(
         parameter.numel()
         for parameter in model.parameters()
@@ -285,14 +356,21 @@ def sanity_check_model(
     )
 
     if trainable_parameters == 0:
+
         raise RuntimeError(
-            "No trainable parameters found."
+            "No trainable parameters."
         )
 
-    # Check cache configuration.
     if model.config.use_cache:
+
         raise RuntimeError(
-            "use_cache must be False during training."
+            "use_cache must be False."
+        )
+
+    if not model.training:
+
+        raise RuntimeError(
+            "Model is not in training mode."
         )
 
     print("=" * 80)
@@ -300,26 +378,6 @@ def sanity_check_model(
     print("=" * 80)
 
 
-def enable_training_optimizations(
-    model: Any,
-) -> Any:
-    """
-    Enable training optimizations for efficient
-    LoRA fine-tuning.
-    """
-
-    # Disable KV cache during training.
-    model.config.use_cache = False
-
-    # Enable gradient checkpointing to reduce
-    # GPU memory usage.
-    model.gradient_checkpointing_enable()
-
-    # Required for gradient checkpointing with
-    # some transformer architectures.
-    model.enable_input_require_grads()
-
-    return model
 
 
 

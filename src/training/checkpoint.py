@@ -13,24 +13,20 @@ def save_checkpoint(
     epoch: int,
     global_step: int,
     best_validation_loss: float,
-) -> None:
+) -> str:
     """
-    Save the latest training checkpoint.
+    Save a versioned checkpoint and update latest.pt.
     """
 
     config = load_configs()
 
-    checkpoint_directory = config["checkpoint"]["save_directory"]
-    checkpoint_filename = config["checkpoint"]["file_name"]
+    checkpoint_directory = (
+        config["checkpoint"]["save_directory"]
+    )
 
     os.makedirs(
         checkpoint_directory,
         exist_ok=True,
-    )
-
-    checkpoint_path = os.path.join(
-        checkpoint_directory,
-        checkpoint_filename,
     )
 
     checkpoint = {
@@ -44,23 +40,55 @@ def save_checkpoint(
         "scheduler_state_dict": scheduler.state_dict(),
     }
 
-    torch.save(
-        checkpoint,
-        checkpoint_path,
+    versioned_checkpoint = os.path.join(
+        checkpoint_directory,
+        f"epoch_{epoch}.pt",
     )
 
-    print(f"\nLatest checkpoint saved to:\n{checkpoint_path}")
+    latest_checkpoint = os.path.join(
+        checkpoint_directory,
+        "latest.pt",
+    )
 
+    torch.save(
+        checkpoint,
+        versioned_checkpoint,
+    )
 
+    torch.save(
+        checkpoint,
+        latest_checkpoint,
+    )
 
+    if not verify_checkpoint(
+        latest_checkpoint,
+    ):
+
+        raise RuntimeError(
+            "Checkpoint verification failed."
+        )
+
+    print(
+        "\nCheckpoint saved successfully."
+    )
+
+    print(
+        f"Latest   : {latest_checkpoint}"
+    )
+
+    print(
+        f"Version  : {versioned_checkpoint}"
+    )
+
+    return latest_checkpoint
 
 def load_checkpoint(
     model,
     optimizer,
     scheduler,
-):
+) -> dict:
     """
-    Load a saved checkpoint.
+    Load a training checkpoint if resume is enabled.
     """
 
     config = load_configs()
@@ -69,7 +97,11 @@ def load_checkpoint(
 
     if not resume_config["enabled"]:
 
+        print("=" * 80)
+        print("TRAINING MODE")
+        print("=" * 80)
         print("Starting training from scratch.")
+        print("=" * 80)
 
         return {
             "model": model,
@@ -82,19 +114,55 @@ def load_checkpoint(
 
     checkpoint_path = resume_config["path"]
 
-    if not os.path.exists(checkpoint_path):
+    if not os.path.isfile(
+        checkpoint_path,
+    ):
 
         raise FileNotFoundError(
-            f"Checkpoint not found: {checkpoint_path}"
+            f"Checkpoint not found:\n{checkpoint_path}"
         )
+
+    print("=" * 80)
+    print("LOADING CHECKPOINT")
+    print("=" * 80)
+    print(
+        f"Checkpoint : {checkpoint_path}"
+    )
 
     checkpoint = torch.load(
         checkpoint_path,
         map_location="cpu",
     )
 
+    required_keys = [
+        "epoch",
+        "global_step",
+        "best_validation_loss",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "scheduler_state_dict",
+    ]
+
+    missing_keys = [
+
+        key
+
+        for key in required_keys
+
+        if key not in checkpoint
+
+    ]
+
+    if missing_keys:
+
+        raise RuntimeError(
+            "Checkpoint is corrupted.\n"
+            f"Missing keys: {missing_keys}"
+        )
+
     model.load_state_dict(
-        checkpoint["model_state_dict"]
+        checkpoint["model_state_dict"],
+        strict=False,
     )
 
     optimizer.load_state_dict(
@@ -105,19 +173,43 @@ def load_checkpoint(
         checkpoint["scheduler_state_dict"]
     )
 
-    print(f"\nLoaded checkpoint: {checkpoint_path}")
+    start_epoch = (
+        checkpoint["epoch"]
+    )
+
+    global_step = (
+        checkpoint["global_step"]
+    )
+
+    best_loss = (
+        checkpoint["best_validation_loss"]
+    )
 
     print_checkpoint_info(
         checkpoint,
     )
 
+    print("=" * 80)
+    print("RESUME INFORMATION")
+    print("=" * 80)
+    print(
+        f"Next Epoch          : {start_epoch + 1}"
+    )
+    print(
+        f"Global Step         : {global_step}"
+    )
+    print(
+        f"Best Validation Loss: {best_loss:.6f}"
+    )
+    print("=" * 80)
+
     return {
         "model": model,
         "optimizer": optimizer,
         "scheduler": scheduler,
-        "start_epoch": checkpoint["epoch"]+1,
-        "global_step": checkpoint["global_step"],
-        "best_loss": checkpoint["best_validation_loss"],
+        "start_epoch": start_epoch,
+        "global_step": global_step,
+        "best_loss": best_loss,
     }
 
 def save_best_checkpoint(
@@ -243,10 +335,12 @@ def print_checkpoint_info(
 
     print("=" * 80)
 
+
+
 def cleanup_old_checkpoints() -> None:
     """
-    Remove old checkpoints while keeping
-    only the most recent checkpoint files.
+    Remove old versioned checkpoints while
+    keeping the newest checkpoint files.
     """
 
     config = load_configs()
@@ -275,7 +369,10 @@ def cleanup_old_checkpoints() -> None:
             checkpoint_directory,
         )
 
-        if file_name.endswith(".pt")
+        if (
+            file_name.endswith(".pt")
+            and file_name != "latest.pt"
+        )
     ]
 
     checkpoint_files.sort(
@@ -293,3 +390,226 @@ def cleanup_old_checkpoints() -> None:
             f"Removed old checkpoint: "
             f"{checkpoint_file}"
         )
+
+def verify_checkpoint(
+    checkpoint_path: str,
+) -> bool:
+    """
+    Verify that a checkpoint can be loaded.
+    """
+
+    try:
+
+        checkpoint = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+        )
+
+        required_keys = {
+            "epoch",
+            "global_step",
+            "best_validation_loss",
+            "model_state_dict",
+            "optimizer_state_dict",
+            "scheduler_state_dict",
+        }
+
+        missing_keys = (
+            required_keys
+            - checkpoint.keys()
+        )
+
+        if missing_keys:
+
+            raise RuntimeError(
+                "Checkpoint missing keys: "
+                f"{missing_keys}"
+            )
+
+        print(
+            "Checkpoint verification passed."
+        )
+
+        return True
+
+    except Exception as error:
+
+        print(
+            "Checkpoint verification failed."
+        )
+
+        print(error)
+
+        return False
+
+
+def get_latest_checkpoint_path() -> str:
+    """
+    Return the newest checkpoint path.
+    """
+
+    config = load_configs()
+
+    checkpoint_directory = (
+        config["checkpoint"]["save_directory"]
+    )
+
+    if not os.path.exists(
+        checkpoint_directory,
+    ):
+
+        raise FileNotFoundError(
+            "Checkpoint directory not found."
+        )
+
+    checkpoint_files = [
+
+        os.path.join(
+            checkpoint_directory,
+            file_name,
+        )
+
+        for file_name in os.listdir(
+            checkpoint_directory,
+        )
+
+        if file_name.endswith(".pt")
+    ]
+
+    if not checkpoint_files:
+
+        raise FileNotFoundError(
+            "No checkpoints found."
+        )
+
+    checkpoint_files.sort(
+        key=os.path.getmtime,
+        reverse=True,
+    )
+
+    return checkpoint_files[0]
+
+
+
+def delete_checkpoint(
+    checkpoint_path: str,
+) -> None:
+    """
+    Delete a checkpoint file.
+    """
+
+    if not os.path.exists(
+        checkpoint_path,
+    ):
+
+        print(
+            f"Checkpoint not found:\n"
+            f"{checkpoint_path}"
+        )
+
+        return
+
+    os.remove(
+        checkpoint_path,
+    )
+
+    print(
+        f"Deleted checkpoint:\n"
+        f"{checkpoint_path}"
+    )
+
+
+def list_checkpoints() -> list[str]:
+    """
+    Return all available checkpoints.
+    """
+
+    config = load_configs()
+
+    checkpoint_directory = (
+        config["checkpoint"]["save_directory"]
+    )
+
+    if not os.path.exists(
+        checkpoint_directory,
+    ):
+
+        return []
+
+    checkpoint_files = [
+
+        os.path.join(
+            checkpoint_directory,
+            file_name,
+        )
+
+        for file_name in os.listdir(
+            checkpoint_directory,
+        )
+
+        if file_name.endswith(".pt")
+    ]
+
+    checkpoint_files.sort(
+        key=os.path.getmtime,
+        reverse=True,
+    )
+
+    return checkpoint_files
+
+
+
+def print_available_checkpoints() -> None:
+    """
+    Print all saved checkpoints.
+    """
+
+    checkpoint_files = list_checkpoints()
+
+    print("=" * 80)
+    print("AVAILABLE CHECKPOINTS")
+    print("=" * 80)
+
+    if not checkpoint_files:
+
+        print(
+            "No checkpoints found."
+        )
+
+        print("=" * 80)
+
+        return
+
+    for index, checkpoint_file in enumerate(
+        checkpoint_files,
+        start=1,
+    ):
+
+        checkpoint = torch.load(
+            checkpoint_file,
+            map_location="cpu",
+        )
+
+        print(
+            f"{index}. "
+            f"{os.path.basename(checkpoint_file)}"
+        )
+
+        print(
+            f"   Epoch      : "
+            f"{checkpoint['epoch']}"
+        )
+
+        print(
+            f"   Best Loss  : "
+            f"{checkpoint['best_validation_loss']:.6f}"
+        )
+
+        print(
+            f"   Saved At   : "
+            f"{checkpoint['timestamp']}"
+        )
+
+        print()
+
+    print("=" * 80)

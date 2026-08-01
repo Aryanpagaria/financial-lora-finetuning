@@ -2,7 +2,10 @@ from typing import Any
 from src.training.tokenizer import get_tokenizer
 import torch
 from tqdm import tqdm
-from src.evaluation.evaluator import evaluate
+from src.evaluation.evaluator import (
+    evaluate,
+    print_evaluation_summary,
+)
 from src.training.dataset import get_dataloaders
 from src.training.model import get_model
 from src.training.optimizer import (
@@ -40,22 +43,35 @@ from src.utils.w_log import (
 from src.training.early_stopping import EarlyStopping
 
 
-
 def move_batch_to_device(
     batch: dict,
     device: torch.device,
 ) -> dict:
     """
-    Move a batch to the selected device.
+    Move every tensor in a batch to the target device.
     """
 
-    return {
-        key: value.to(device)
-        for key, value in batch.items()
-    }
+    moved_batch = {}
 
+    for key, value in batch.items():
 
-def load_training_components():
+        if isinstance(
+            value,
+            torch.Tensor,
+        ):
+
+            moved_batch[key] = value.to(
+                device,
+                non_blocking=True,
+            )
+
+        else:
+
+            moved_batch[key] = value
+
+    return moved_batch
+
+def load_training_components() -> tuple:
     """
     Load every component required for training.
     """
@@ -70,6 +86,13 @@ def load_training_components():
 
     train_dataloader = dataloaders["train"]
     validation_dataloader = dataloaders["validation"]
+
+    if len(train_dataloader) == 0:
+
+        raise RuntimeError(
+            "Training dataloader is empty."
+        )
+
     tokenizer = get_tokenizer()
 
     model = get_model()
@@ -89,6 +112,12 @@ def load_training_components():
         * epochs
     )
 
+    if total_training_steps <= 0:
+
+        raise RuntimeError(
+            "Training steps must be greater than zero."
+        )
+
     scheduler = get_lr_scheduler(
         optimizer=optimizer,
         num_training_steps=total_training_steps,
@@ -104,11 +133,9 @@ def load_training_components():
         validation_dataloader,
         tokenizer,
         model,
-    optimizer,
-    scheduler,
-)
-
-
+        optimizer,
+        scheduler,
+    )
 
 
 def train_one_epoch(
@@ -124,22 +151,34 @@ def train_one_epoch(
 
     model.train()
 
+    
+
     config = load_configs()
 
     gradient_accumulation_steps = (
-        config["training"]["gradient_accumulation_steps"]
+        config["training"][
+            "gradient_accumulation_steps"
+        ]
     )
 
     total_loss = 0.0
     total_gradient_norm = 0.0
 
+    optimizer.zero_grad(
+        set_to_none=True,
+    )
+
     progress_bar = tqdm(
         train_dataloader,
         desc="Training",
         leave=False,
+        dynamic_ncols=True,
     )
 
-    optimizer.zero_grad()
+    total_batches = len(
+        train_dataloader,
+    )
+    
 
     for step, batch in enumerate(
         progress_bar,
@@ -162,7 +201,7 @@ def train_one_epoch(
 
         if (
             step % gradient_accumulation_steps == 0
-            or step == len(train_dataloader)
+            or step == total_batches
         ):
 
             trainable_parameters = list(
@@ -172,11 +211,7 @@ def train_one_epoch(
                 )
             )
 
-            trainable_with_grad = sum(
-                1
-                for parameter in trainable_parameters
-                if parameter.grad is not None
-            )
+            
 
             
 
@@ -187,13 +222,15 @@ def train_one_epoch(
 
             total_gradient_norm += gradient_norm.item()
 
-            total_gradient_norm += gradient_norm.item()
+            
 
             optimizer.step()
 
             scheduler.step()
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(
+                set_to_none=True,
+            )
 
         total_loss += (
             loss.item()
@@ -266,102 +303,226 @@ def train() -> dict:
     early_stopping = EarlyStopping()
     early_stopping.best_loss = best_loss
 
-    initialize_wandb()
+    try:
+
+        initialize_wandb()
+
+    except Exception as error:
+
+        print(
+            f"W&B initialization failed: {error}"
+        )
 
     print(f"\nTraining started on {device}\n")
 
-    for epoch in range(start_epoch, epochs):
+    completed_epochs = start_epoch
 
-        print("=" * 80)
-        print(f"Epoch {epoch + 1}/{epochs}")
-        print("=" * 80)
+    try:
 
-        (
-            train_loss,
-            gradient_norm,
-        ) = train_one_epoch(
-        model=model,
-        train_dataloader=train_dataloader,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        )
+        for epoch in range(
+            start_epoch,
+            epochs,
+        ):
 
-        evaluation_metrics = evaluate(
-            model=model,
-            dataloader=validation_dataloader,
-            device=device,
-        )
+            print("=" * 80)
+            print(
+                f"Epoch {epoch + 1}/{epochs}"
+            )
+            print("=" * 80)
 
-        validation_loss = evaluation_metrics["loss"]
-        if validation_loss < best_loss:
-            best_loss = validation_loss
-
-            save_best_checkpoint(
+            (
+                train_loss,
+                gradient_norm,
+            ) = train_one_epoch(
                 model=model,
-                validation_loss=validation_loss,
+                train_dataloader=train_dataloader,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                device=device,
             )
 
-        global_step += len(train_dataloader)
+            evaluation_metrics = evaluate(
+                model=model,
+                dataloader=validation_dataloader,
+                device=device,
+            )
+
+            print_evaluation_summary(
+                evaluation_metrics,
+            )
+
+            validation_loss = evaluation_metrics["loss"]
+
+            if validation_loss < best_loss:
+
+                best_loss = validation_loss
+
+                save_best_checkpoint(
+                    model=model,
+                    validation_loss=validation_loss,
+                )
+
+            global_step += len(
+                train_dataloader
+            )
+
+            print(
+                f"Train Loss      : "
+                f"{train_loss:.4f}"
+            )
+
+            print(
+                f"Gradient Norm   : "
+                f"{gradient_norm:.4f}"
+            )
+
+            print(
+                f"Validation Loss : "
+                f"{validation_loss:.4f}"
+            )
+
+            save_checkpoint(
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=epoch + 1,
+                global_step=global_step,
+                best_validation_loss=best_loss,
+            )
+
+            cleanup_old_checkpoints()
+
+            current_learning_rate = (
+                scheduler.get_last_lr()[0]
+            )
+
+            try:
+
+                log_metrics(
+                    epoch=epoch + 1,
+                    train_loss=train_loss,
+                    validation_loss=validation_loss,
+                    learning_rate=current_learning_rate,
+                    gradient_norm=gradient_norm,
+                    global_step=global_step,
+                )
+
+            except Exception as error:
+
+                print(
+                    f"W&B logging failed: "
+                    f"{error}"
+                )
+
+            completed_epochs = epoch + 1
+
+            should_stop = (
+                early_stopping.update(
+                    validation_loss
+                )
+            )
+
+            if should_stop:
+
+                print(
+                    "\nEarly stopping triggered."
+                )
+
+                break
+
+    except KeyboardInterrupt:
 
         print(
-            f"Train Loss      : {train_loss:.4f}"
-        )
-
-        print(
-            f"Gradient Norm   : {gradient_norm:.4f}"
-        )
-
-        print(
-            f"Validation Loss : {validation_loss:.4f}"
+            "\nTraining interrupted by user."
         )
 
         save_checkpoint(
             model=model,
             optimizer=optimizer,
             scheduler=scheduler,
-            epoch=epoch + 1,
+            epoch=completed_epochs,
             global_step=global_step,
             best_validation_loss=best_loss,
         )
-        cleanup_old_checkpoints()
 
-        current_learning_rate = scheduler.get_last_lr()[0]
-
-        log_metrics(
-            epoch=epoch + 1,
-            train_loss=train_loss,
-            validation_loss=validation_loss,
-            learning_rate=current_learning_rate,
-            gradient_norm=gradient_norm,
+        print(
+            "Emergency checkpoint saved."
         )
 
-        should_stop = early_stopping.update(
-            validation_loss
+        raise
+
+    except Exception as error:
+
+        print(
+            f"\nTraining failed: {error}"
         )
 
-        if should_stop:
+        save_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=completed_epochs,
+            global_step=global_step,
+            best_validation_loss=best_loss,
+        )
 
-            print("\nEarly stopping triggered.")
+        print(
+            "Emergency checkpoint saved."
+        )
 
-            break
-    export_lora_adapter(
-        model=model,
-        tokenizer=tokenizer,
-    )
-    print("=" * 80)
-    print("TRAINING SUMMARY")
-    print("=" * 80)
-    print(f"Best Validation Loss : {best_loss:.6f}")
-    print(f"Completed Epochs     : {epoch + 1}")
-    print(f"Global Steps         : {global_step}")
-    print("=" * 80)
-    finish_wandb()
+        raise
 
-    print("\nTraining Finished Successfully.")
-    
+    finally:
+
+        try:
+
+            export_lora_adapter(
+                model=model,
+                tokenizer=tokenizer,
+            )
+
+        except Exception as error:
+
+            print(
+                f"LoRA export failed: "
+                f"{error}"
+            )
+
+        print("=" * 80)
+        print("TRAINING SUMMARY")
+        print("=" * 80)
+
+        print(
+            f"Best Validation Loss : "
+            f"{best_loss:.6f}"
+        )
+
+        print(
+            f"Completed Epochs     : "
+            f"{completed_epochs}"
+        )
+
+        print(
+            f"Global Steps         : "
+            f"{global_step}"
+        )
+
+        print("=" * 80)
+
+        try:
+
+            finish_wandb()
+
+        except Exception:
+
+            pass
+
+        print(
+            "\nTraining Finished."
+        )
+
     return {
         "best_validation_loss": best_loss,
         "global_step": global_step,
-        "epochs_completed": epoch + 1,
+        "epochs_completed": completed_epochs,
     }

@@ -35,15 +35,8 @@ def log_metrics(
     train_loss: float,
     validation_loss: float,
     learning_rate: float,
+    gradient_norm: float,
 ) -> None:
-    """
-    Log training metrics.
-    """
-
-    config = load_configs()
-
-    if not config["wandb"]["enabled"]:
-        return
 
     wandb.log(
         {
@@ -51,6 +44,7 @@ def log_metrics(
             "train_loss": train_loss,
             "validation_loss": validation_loss,
             "learning_rate": learning_rate,
+            "gradient_norm": gradient_norm,
         }
     )
 

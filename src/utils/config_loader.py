@@ -16,22 +16,49 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_configs() -> dict[str, Any]:
-    """Load all project configuration files."""
+    """
+    Load and merge every project configuration file.
+    """
 
-    model_config = _load_yaml(
-        CONFIG_DIR / "model" / "model.yaml"
+    configuration = {}
+
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "model" / "model.yaml"
+        )
     )
 
-    training_config = _load_yaml(
-        CONFIG_DIR / "training" / "training.yaml"
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "training" / "training.yaml"
+        )
     )
 
-    config = {}
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "checkpoint" / "checkpoint.yaml"
+        )
+    )
 
-    config.update(model_config)
-    config.update(training_config)
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "logging" / "logging.yaml"
+        )
+    )
 
-    return config
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "evaluation" / "evaluation.yaml"
+        )
+    )
+
+    configuration.update(
+        _load_yaml(
+            CONFIG_DIR / "data" / "data.yaml"
+        )
+    )
+
+    return configuration
 
 
 if __name__ == "__main__":

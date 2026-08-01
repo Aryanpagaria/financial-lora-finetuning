@@ -15,47 +15,32 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(file) or {}
 
 
-def load_configs() -> dict[str, Any]:
-    """
-    Load and merge every project configuration file.
-    """
+def load_configs():
 
     configuration = {}
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "model" / "model.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "model" / "model.yaml")
     )
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "training" / "training.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "training" / "training.yaml")
     )
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "checkpoint" / "checkpoint.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "checkpoint" / "checkpoint.yaml")
     )
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "logging" / "logging.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "logging" / "logging.yaml")
     )
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "evaluation" / "evaluation.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "evaluation" / "evaluation.yaml")
     )
 
     configuration.update(
-        _load_yaml(
-            CONFIG_DIR / "data" / "data.yaml"
-        )
+        _load_yaml(CONFIG_DIR / "data" / "data.yaml")
     )
 
     return configuration

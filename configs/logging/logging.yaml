@@ -1,0 +1,6 @@
+logging:
+  level: INFO
+
+  log_directory: artifacts/logs
+
+  file_name: training.log

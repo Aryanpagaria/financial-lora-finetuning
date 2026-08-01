@@ -14,5 +14,5 @@ checkpoint:
   lora_export_directory: artifacts/lora_adapter
 
   resume:
-    enabled: false
+    enabled: true
     path: artifacts/checkpoints/latest.pt

@@ -59,8 +59,24 @@ hf_cache/
 # ==========================================================
 # Model Artifacts
 # ==========================================================
-artifacts/
 
+# Ignore generated files
+artifacts/**
+
+# Keep directory structure
+!artifacts/
+!artifacts/checkpoints/
+!artifacts/best_model/
+!artifacts/lora_adapter/
+!artifacts/logs/
+
+# Keep placeholder files
+!artifacts/checkpoints/.gitkeep
+!artifacts/best_model/.gitkeep
+!artifacts/lora_adapter/.gitkeep
+!artifacts/logs/.gitkeep
+
+# Ignore model weights
 *.pt
 *.pth
 *.bin

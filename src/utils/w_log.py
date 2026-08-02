@@ -1,16 +1,58 @@
-"""
-Weights & Biases logging utilities.
-"""
+import logging
+import os
 
 import wandb
 
 from src.utils.config_loader import load_configs
 
+def initialize_logger() -> None:
+    """
+    Initialize the local training logger.
+    """
+
+    config = load_configs()
+
+    logging_config = config["logging"]
+
+    log_directory = (
+        logging_config["log_directory"]
+    )
+
+    os.makedirs(
+        log_directory,
+        exist_ok=True,
+    )
+
+    log_file = os.path.join(
+        log_directory,
+        logging_config["file_name"],
+    )
+
+    logging.basicConfig(
+        filename=log_file,
+        level=getattr(
+            logging,
+            logging_config["level"],
+        ),
+        format=(
+            "%(asctime)s | "
+            "%(levelname)s | "
+            "%(message)s"
+        ),
+        force=True,
+    )
+
+    print(
+        f"Logging to: {log_file}"
+    )
+
 
 def initialize_wandb() -> None:
     """
-    Initialize a Weights & Biases run.
+    Initialize logging and W&B.
     """
+
+    initialize_logger()
 
     config = load_configs()
 
@@ -18,13 +60,25 @@ def initialize_wandb() -> None:
 
     if not wandb_config["enabled"]:
 
-        print("W&B is disabled.")
+        logging.info(
+            "Weights & Biases disabled."
+        )
+
+        print(
+            "W&B is disabled."
+        )
 
         return
 
     if wandb.run is not None:
 
-        print("W&B run already exists.")
+        logging.info(
+            "W&B already initialized."
+        )
+
+        print(
+            "W&B run already exists."
+        )
 
         return
 
@@ -36,7 +90,13 @@ def initialize_wandb() -> None:
         config=config,
     )
 
-    print("Weights & Biases initialized.")
+    logging.info(
+        "Weights & Biases initialized."
+    )
+
+    print(
+        "Weights & Biases initialized."
+    )
 
 
 def log_metrics(
@@ -48,8 +108,17 @@ def log_metrics(
     global_step: int,
 ) -> None:
     """
-    Log training metrics to W&B.
+    Log metrics locally and to W&B.
     """
+
+    logging.info(
+        f"Epoch={epoch} | "
+        f"GlobalStep={global_step} | "
+        f"TrainLoss={train_loss:.6f} | "
+        f"ValidationLoss={validation_loss:.6f} | "
+        f"LearningRate={learning_rate:.8f} | "
+        f"GradientNorm={gradient_norm:.6f}"
+    )
 
     config = load_configs()
 
@@ -77,6 +146,10 @@ def finish_wandb() -> None:
     Finish the current W&B run.
     """
 
+    logging.info(
+        "Training finished."
+    )
+
     config = load_configs()
 
     if not config["wandb"]["enabled"]:
@@ -89,4 +162,6 @@ def finish_wandb() -> None:
 
     wandb.finish()
 
-    print("Weights & Biases run finished.")
+    print(
+        "Weights & Biases run finished."
+    )

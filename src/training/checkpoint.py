@@ -1,10 +1,10 @@
 import os
+import shutil
 from datetime import datetime
 
 import torch
 
 from src.utils.config_loader import load_configs
-
 
 def save_checkpoint(
     model,
@@ -15,7 +15,13 @@ def save_checkpoint(
     best_validation_loss: float,
 ) -> str:
     """
-    Save a versioned checkpoint and update latest.pt.
+    Save a complete training checkpoint.
+
+    Every checkpoint is:
+    1. Saved to a temporary file.
+    2. Verified.
+    3. Atomically renamed.
+    4. Backed up to Google Drive.
     """
 
     config = load_configs()
@@ -50,37 +56,124 @@ def save_checkpoint(
         "latest.pt",
     )
 
-    torch.save(
-        checkpoint,
-        versioned_checkpoint,
+    versioned_tmp = (
+        versioned_checkpoint + ".tmp"
     )
+
+    latest_tmp = (
+        latest_checkpoint + ".tmp"
+    )
+
+    # --------------------------------------------------
+    # Save temporary versioned checkpoint
+    # --------------------------------------------------
 
     torch.save(
         checkpoint,
+        versioned_tmp,
+    )
+
+    if not verify_checkpoint(
+        versioned_tmp,
+    ):
+
+        if os.path.exists(
+            versioned_tmp,
+        ):
+            os.remove(
+                versioned_tmp,
+            )
+
+        raise RuntimeError(
+            "Versioned checkpoint verification failed."
+        )
+
+    os.replace(
+        versioned_tmp,
+        versioned_checkpoint,
+    )
+
+    # --------------------------------------------------
+    # Save temporary latest checkpoint
+    # --------------------------------------------------
+
+    torch.save(
+        checkpoint,
+        latest_tmp,
+    )
+
+    if not verify_checkpoint(
+        latest_tmp,
+    ):
+
+        if os.path.exists(
+            latest_tmp,
+        ):
+            os.remove(
+                latest_tmp,
+            )
+
+        raise RuntimeError(
+            "Latest checkpoint verification failed."
+        )
+
+    os.replace(
+        latest_tmp,
         latest_checkpoint,
     )
+
+    # --------------------------------------------------
+    # Final verification
+    # --------------------------------------------------
+
+    if not verify_checkpoint(
+        versioned_checkpoint,
+    ):
+        raise RuntimeError(
+            "Final verification failed "
+            "for versioned checkpoint."
+        )
 
     if not verify_checkpoint(
         latest_checkpoint,
     ):
-
         raise RuntimeError(
-            "Checkpoint verification failed."
+            "Final verification failed "
+            "for latest checkpoint."
         )
 
-    print(
-        "\nCheckpoint saved successfully."
+    # --------------------------------------------------
+    # Backup to Google Drive
+    # --------------------------------------------------
+
+    backup_checkpoint_to_drive(
+        versioned_checkpoint,
     )
 
+    backup_checkpoint_to_drive(
+        latest_checkpoint,
+    )
+
+    print("=" * 80)
+    print("CHECKPOINT SAVED")
+    print("=" * 80)
+    print(
+        f"Epoch    : {epoch}"
+    )
     print(
         f"Latest   : {latest_checkpoint}"
     )
-
     print(
         f"Version  : {versioned_checkpoint}"
     )
+    print("=" * 80)
 
     return latest_checkpoint
+
+
+
+
+
 
 def load_checkpoint(
     model,
@@ -235,6 +328,8 @@ def save_best_checkpoint(
         best_model_directory,
     )
 
+    backup_best_model_to_drive()
+
     print(
         "\nNew best model saved "
         f"(Validation Loss: {validation_loss:.6f})"
@@ -244,40 +339,65 @@ def save_best_checkpoint(
         f"Location: {best_model_directory}"
     )
 
-def export_lora_adapter(
-    model,
-    tokenizer,
-) -> None:
+def backup_lora_adapter_to_drive() -> None:
     """
-    Export the trained LoRA adapter and tokenizer.
+    Backup the exported LoRA adapter to Google Drive.
     """
+
+    drive_root = "/content/drive/MyDrive"
+
+    if not os.path.exists(
+        drive_root,
+    ):
+
+        print(
+            "Google Drive is not mounted. "
+            "Skipping LoRA backup."
+        )
+
+        return
 
     config = load_configs()
 
-    export_directory = (
-        config["checkpoint"]["lora_export_directory"]
+    source_directory = (
+        config["checkpoint"][
+            "lora_export_directory"
+        ]
     )
 
-    os.makedirs(
-        export_directory,
-        exist_ok=True,
+    if not os.path.exists(
+        source_directory,
+    ):
+        print(
+            "LoRA adapter directory not found."
+        )
+
+        return
+
+    destination_directory = os.path.join(
+        drive_root,
+        "Financial-LoRA",
+        "artifacts",
+        "lora_adapter",
     )
 
-    model.save_pretrained(
-        export_directory,
-    )
+    if os.path.exists(
+        destination_directory,
+    ):
 
-    tokenizer.save_pretrained(
-        export_directory,
+        shutil.rmtree(
+            destination_directory,
+        )
+
+    shutil.copytree(
+        source_directory,
+        destination_directory,
     )
 
     print(
-        "\nLoRA adapter exported successfully."
+        "LoRA adapter backed up to Google Drive."
     )
 
-    print(
-        f"Location: {export_directory}"
-    )
 
 def checkpoint_exists() -> bool:
     """
@@ -301,6 +421,80 @@ def checkpoint_exists() -> bool:
 
     return os.path.exists(
         checkpoint_path,
+    )
+
+
+def backup_checkpoint_to_drive(
+    source_path: str,
+) -> None:
+    """
+    Copy a verified checkpoint to Google Drive.
+
+    If Google Drive is not mounted,
+    the backup is skipped.
+    """
+
+    drive_root = "/content/drive/MyDrive"
+
+    if not os.path.exists(
+        drive_root,
+    ):
+
+        print(
+            "Google Drive is not mounted. "
+            "Skipping backup."
+        )
+
+        return
+
+    backup_directory = os.path.join(
+        drive_root,
+        "Financial-LoRA",
+        "artifacts",
+        "checkpoints",
+    )
+
+    os.makedirs(
+        backup_directory,
+        exist_ok=True,
+    )
+
+    destination_path = os.path.join(
+        backup_directory,
+        os.path.basename(
+            source_path,
+        ),
+    )
+
+    shutil.copy2(
+        source_path,
+        destination_path,
+    )
+
+    if not os.path.exists(
+        destination_path,
+    ):
+
+        raise RuntimeError(
+            f"Google Drive backup failed:\n"
+            f"{destination_path}"
+        )
+
+    if (
+        os.path.getsize(source_path)
+        != os.path.getsize(destination_path)
+    ):
+
+        raise RuntimeError(
+            "Google Drive backup is incomplete."
+        )
+
+    print(
+        "Checkpoint backed up to Google Drive."
+    )
+
+    print(
+        destination_path,
     )
 
 def print_checkpoint_info(
@@ -585,31 +779,134 @@ def print_available_checkpoints() -> None:
         start=1,
     ):
 
-        checkpoint = torch.load(
-            checkpoint_file,
-            map_location="cpu",
-        )
-
         print(
             f"{index}. "
             f"{os.path.basename(checkpoint_file)}"
         )
 
-        print(
-            f"   Epoch      : "
-            f"{checkpoint['epoch']}"
-        )
+        try:
 
-        print(
-            f"   Best Loss  : "
-            f"{checkpoint['best_validation_loss']:.6f}"
-        )
+            checkpoint = torch.load(
+                checkpoint_file,
+                map_location="cpu",
+            )
 
-        print(
-            f"   Saved At   : "
-            f"{checkpoint['timestamp']}"
-        )
+            print(
+                f"   Epoch      : "
+                f"{checkpoint['epoch']}"
+            )
+
+            print(
+                f"   Best Loss  : "
+                f"{checkpoint['best_validation_loss']:.6f}"
+            )
+
+            print(
+                f"   Saved At   : "
+                f"{checkpoint['timestamp']}"
+            )
+
+        except Exception:
+
+            print(
+                "   Status     : CORRUPTED"
+            )
 
         print()
 
     print("=" * 80)
+
+
+def backup_best_model_to_drive() -> None:
+    """
+    Backup the best LoRA adapter to Google Drive.
+    """
+
+    drive_root = "/content/drive/MyDrive"
+
+    if not os.path.exists(
+        drive_root,
+    ):
+
+        print(
+            "Google Drive is not mounted. "
+            "Skipping best model backup."
+        )
+
+        return
+
+    config = load_configs()
+
+    source_directory = (
+        config["checkpoint"][
+            "best_model_directory"
+        ]
+    )
+
+    if not os.path.exists(
+        source_directory,
+    ):
+        return
+
+    destination_directory = os.path.join(
+        drive_root,
+        "Financial-LoRA",
+        "artifacts",
+        "best_model",
+    )
+
+    if os.path.exists(
+        destination_directory,
+    ):
+        shutil.rmtree(
+            destination_directory,
+        )
+
+    shutil.copytree(
+        source_directory,
+        destination_directory,
+    )
+
+    print(
+        "Best model backed up to Drive."
+    )
+
+
+def export_lora_adapter(
+    model,
+    tokenizer,
+) -> None:
+    """
+    Export the trained LoRA adapter and tokenizer.
+    """
+
+    config = load_configs()
+
+    export_directory = (
+        config["checkpoint"][
+            "lora_export_directory"
+        ]
+    )
+
+    os.makedirs(
+        export_directory,
+        exist_ok=True,
+    )
+
+    model.save_pretrained(
+        export_directory,
+    )
+
+    tokenizer.save_pretrained(
+        export_directory,
+    )
+
+    backup_lora_adapter_to_drive()
+
+    print(
+        "\nLoRA adapter exported successfully."
+    )
+
+    print(
+        f"Location: {export_directory}"
+    )

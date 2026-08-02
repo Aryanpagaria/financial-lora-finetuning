@@ -428,10 +428,8 @@ def backup_checkpoint_to_drive(
     source_path: str,
 ) -> None:
     """
-    Copy a verified checkpoint to Google Drive.
-
-    If Google Drive is not mounted,
-    the backup is skipped.
+    Copy a verified checkpoint to Google Drive and
+    verify that the copied checkpoint is valid.
     """
 
     drive_root = "/content/drive/MyDrive"
@@ -480,22 +478,76 @@ def backup_checkpoint_to_drive(
             f"{destination_path}"
         )
 
-    if (
-        os.path.getsize(source_path)
-        != os.path.getsize(destination_path)
-    ):
+    source_size = os.path.getsize(
+        source_path,
+    )
+
+    destination_size = os.path.getsize(
+        destination_path,
+    )
+
+    if source_size != destination_size:
 
         raise RuntimeError(
             "Google Drive backup is incomplete."
         )
 
-    print(
-        "Checkpoint backed up to Google Drive."
+    source_checkpoint = torch.load(
+        source_path,
+        map_location="cpu",
     )
 
-    print(
+    destination_checkpoint = torch.load(
         destination_path,
+        map_location="cpu",
     )
+
+    required_keys = {
+        "epoch",
+        "global_step",
+        "best_validation_loss",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "scheduler_state_dict",
+    }
+
+    missing_keys = (
+        required_keys
+        - destination_checkpoint.keys()
+    )
+
+    if missing_keys:
+
+        raise RuntimeError(
+            "Drive checkpoint is corrupted.\n"
+            f"Missing keys: {missing_keys}"
+        )
+
+    if (
+        source_checkpoint["epoch"]
+        != destination_checkpoint["epoch"]
+    ):
+
+        raise RuntimeError(
+            "Drive checkpoint epoch mismatch."
+        )
+
+    print("=" * 80)
+    print("GOOGLE DRIVE BACKUP VERIFIED")
+    print("=" * 80)
+    print(
+        f"Checkpoint : {os.path.basename(source_path)}"
+    )
+    print(
+        f"Epoch      : "
+        f"{destination_checkpoint['epoch']}"
+    )
+    print(
+        f"Location   : "
+        f"{destination_path}"
+    )
+    print("=" * 80)
+
 
 def print_checkpoint_info(
     checkpoint: dict,

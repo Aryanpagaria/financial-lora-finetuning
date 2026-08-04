@@ -5,7 +5,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# ==========================================================
 # C Extensions
+# ==========================================================
 *.so
 
 # ==========================================================
@@ -42,7 +44,6 @@ Thumbs.db
 # ==========================================================
 # Logs
 # ==========================================================
-logs/
 *.log
 
 # ==========================================================
@@ -57,51 +58,14 @@ wandb/
 hf_cache/
 
 # ==========================================================
-# Model Artifacts
-# ==========================================================
-
-# Ignore generated files
-artifacts/**
-
-# Keep directory structure
-!artifacts/
-!artifacts/checkpoints/
-!artifacts/best_model/
-!artifacts/lora_adapter/
-!artifacts/logs/
-
-
-# Python
-__pycache__/
-*.pyc
-
-# Training artifacts
-artifacts/checkpoints/
-
-# W&B
-wandb/
-
-# Colab
-.ipynb_checkpoints/
-
 # Dataset
+# ==========================================================
 data/raw/
 
-# Logs
-*.log
-
-# Keep placeholder files
-!artifacts/checkpoints/.gitkeep
-!artifacts/best_model/.gitkeep
-!artifacts/lora_adapter/.gitkeep
-!artifacts/logs/.gitkeep
-
-# Ignore model weights
-*.pt
-*.pth
-*.bin
-*.ckpt
-*.safetensors
+# ==========================================================
+# Checkpoints (DO NOT COMMIT)
+# ==========================================================
+artifacts/checkpoints/
 
 # ==========================================================
 # Torch Compile Cache
@@ -137,4 +101,18 @@ htmlcov/
 # Misc
 # ==========================================================
 *.bak
-*.swp   
+*.swp
+
+# ==========================================================
+# Large Model Checkpoints
+# ==========================================================
+*.pt
+*.pth
+*.bin
+*.ckpt
+
+# ==========================================================
+# Keep LoRA Adapter & Best Model
+# ==========================================================
+!artifacts/best_model/**
+!artifacts/lora_adapter/**

@@ -70,6 +70,26 @@ artifacts/**
 !artifacts/lora_adapter/
 !artifacts/logs/
 
+
+# Python
+__pycache__/
+*.pyc
+
+# Training artifacts
+artifacts/checkpoints/
+
+# W&B
+wandb/
+
+# Colab
+.ipynb_checkpoints/
+
+# Dataset
+data/raw/
+
+# Logs
+*.log
+
 # Keep placeholder files
 !artifacts/checkpoints/.gitkeep
 !artifacts/best_model/.gitkeep

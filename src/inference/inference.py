@@ -365,12 +365,11 @@ def generate_response(
     config: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Generate a response and return inference statistics.
+    Generate a response using the fine-tuned LoRA model
+    and return inference statistics.
     """
 
-    generation = config[
-        "generation"
-    ]
+    generation = config["generation"]
 
     device = next(
         model.parameters()
@@ -446,7 +445,27 @@ def generate_response(
     response = tokenizer.decode(
         generated_tokens,
         skip_special_tokens=True,
+        clean_up_tokenization_spaces=True,
     ).strip()
+
+    print("=" * 80)
+    print("DEBUG INFORMATION")
+    print("=" * 80)
+
+    print("Output Shape:")
+    print(outputs.shape)
+
+    print()
+
+    print("Generated Token IDs:")
+    print(generated_tokens[:30])
+
+    print()
+
+    print("Decoded Response:")
+    print(repr(response))
+
+    print("=" * 80)
 
     generated_token_count = (
         generated_tokens.shape[-1]
@@ -483,6 +502,8 @@ def generate_response(
             "top_p"
         ],
     }
+
+
 
 def test_inference(
     question: str,

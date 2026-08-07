@@ -1,10 +1,5 @@
-"""
-Run the Financial LoRA Assistant.
-"""
+def main() -> None:
 
-from src.inference.inference import main
-
-
-if __name__ == "__main__":
-
-    main()
+    test_inference(
+        "What is ROI?"
+    )

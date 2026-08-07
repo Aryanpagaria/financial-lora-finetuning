@@ -19,7 +19,7 @@ generation:
 
 chat:
 
-  max_history: 10
+  max_history: 12
 
   exit_commands:
 
@@ -30,4 +30,4 @@ chat:
     - q
 
     - bye
-  max_history: 12
+  

@@ -4,8 +4,7 @@ from typing import Any
 from transformers import AutoTokenizer
 from src.utils.config_loader import load_configs
 from src.utils.log import get_logger
-import torch
-from pathlib import Path
+
 from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
@@ -370,7 +369,6 @@ def interactive_chat(
 
 
 
-
 def generate_response(
     model: Any,
     tokenizer: Any,
@@ -530,6 +528,30 @@ def test_inference(
     tokenizer = load_tokenizer(
         config,
     )
+    print("=" * 80)
+    print("TOKENIZER DEBUG")
+    print("=" * 80)
+
+    print("Special Tokens:")
+    print(tokenizer.special_tokens_map)
+
+    print()
+
+    print("EOS Token:")
+    print(tokenizer.eos_token)
+    print(tokenizer.eos_token_id)
+
+    print()
+
+    print("PAD Token:")
+    print(tokenizer.pad_token_id)
+    print(tokenizer.pad_token)
+
+
+    print()
+    print("Token 151643:")
+    print(tokenizer.convert_ids_to_tokens([151643]))
+    print(tokenizer.decode([151643]))
 
     model = load_model(
         config,
@@ -569,6 +591,10 @@ def test_inference(
     print(tokenizer.pad_token)
 
     print(tokenizer.pad_token_id)
+    print("=" * 80)
+    print("PROMPT")
+    print("=" * 80)
+    print(prompt)
 
     result = generate_response(
         model=model,

@@ -456,7 +456,7 @@ def generate_response(
     response = tokenizer.decode(
         generated_tokens,
         skip_special_tokens=True,
-        clean_up_tokenization_spaces=True,
+        clean_up_tokenization_spaces=False,
     ).strip()
 
     print("=" * 80)
@@ -557,12 +557,15 @@ def test_inference(
         config,
     )
 
-    model = load_lora_adapter(
-        model,
-        config,
-    )
+    #model = load_lora_adapter(
+        #model,
+        #config,
+    #)
     print("=" * 80)
     print("MODEL TYPE")
+    print(model.peft_config)
+
+    print(model.active_adapter)
     print("=" * 80)
     print(type(model))
 
@@ -677,10 +680,11 @@ def main() -> None:
         config,
     )
 
-    model = load_lora_adapter(
-        model,
-        config,
-    )
+    # TEMPORARY TEST
+    # model = load_lora_adapter(
+    #     model,
+    #     config,
+    # )
 
     interactive_chat(
         model=model,

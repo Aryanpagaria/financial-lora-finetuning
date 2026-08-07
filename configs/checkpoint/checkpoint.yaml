@@ -1,4 +1,5 @@
 checkpoint:
+
   save_directory: artifacts/checkpoints
 
   file_name: latest.pt
@@ -14,5 +15,7 @@ checkpoint:
   lora_export_directory: artifacts/lora_adapter
 
   resume:
+
     enabled: true
+
     path: artifacts/checkpoints/latest.pt

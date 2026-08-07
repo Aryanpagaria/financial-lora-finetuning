@@ -32,6 +32,14 @@ def load_configs():
     )
 
     configuration.update(
+        _load_yaml(
+            CONFIG_DIR
+            / "inference"
+            / "inference.yaml"
+        )
+    )
+
+    configuration.update(
         _load_yaml(CONFIG_DIR / "logging" / "logging.yaml")
     )
 
@@ -44,6 +52,8 @@ def load_configs():
     )
 
     return configuration
+
+
 
 
 if __name__ == "__main__":

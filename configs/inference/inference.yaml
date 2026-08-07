@@ -1,0 +1,32 @@
+generation:
+
+  max_new_tokens: 256
+
+  temperature: 0.2
+
+  top_p: 0.90
+
+  top_k: 50
+
+  do_sample: true
+
+  repetition_penalty: 1.10
+
+  num_beams: 1
+
+  use_cache: true
+
+
+chat:
+
+  max_history: 10
+
+  exit_commands:
+
+    - exit
+
+    - quit
+
+    - q
+
+    - bye

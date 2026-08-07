@@ -21,14 +21,6 @@ def _configure_tokenizer(config: dict[str, Any]) -> PreTrainedTokenizer:
     return tokenizer
 
 
-def get_tokenizer() -> PreTrainedTokenizer:
-    """Return a configured tokenizer."""
-
-    config = load_configs()
-
-    tokenizer = _configure_tokenizer(config)
-
-    return tokenizer
 
 
 

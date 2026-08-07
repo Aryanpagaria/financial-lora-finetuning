@@ -353,6 +353,71 @@ def interactive_chat(
 
         print("-" * 80)
 
+def test_inference(
+    question: str,
+) -> None:
+    """
+    Run a single inference for notebook testing.
+    """
+
+    config = load_inference_config()
+
+    tokenizer = load_tokenizer(
+        config,
+    )
+
+    model = load_model(
+        config,
+    )
+
+    model = load_lora_adapter(
+        model,
+        config,
+    )
+
+    history = []
+
+    history = build_messages(
+        history,
+        question,
+    )
+
+    prompt = tokenizer.apply_chat_template(
+        history,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    result = generate_response(
+        model=model,
+        tokenizer=tokenizer,
+        prompt=prompt,
+        config=config,
+    )
+
+    print("=" * 80)
+    print("QUESTION")
+    print("=" * 80)
+    print(question)
+
+    print()
+
+    print("=" * 80)
+    print("ANSWER")
+    print("=" * 80)
+    print(result["response"])
+
+    print()
+
+    print("=" * 80)
+    print("Generation Statistics")
+    print("=" * 80)
+    print(f"Prompt Tokens    : {result['prompt_tokens']}")
+    print(f"Generated Tokens : {result['generated_tokens']}")
+    print(f"Generation Time  : {result['generation_time']:.2f} sec")
+    print(f"Tokens / Second  : {result['tokens_per_second']:.2f}")
+    print(f"Temperature      : {result['temperature']}")
+    print(f"Top-p            : {result['top_p']}")
 
 def build_messages(
     history: list[dict[str, str]],

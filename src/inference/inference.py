@@ -557,10 +557,10 @@ def test_inference(
         config,
     )
 
-    #model = load_lora_adapter(
-        #model,
-        #config,
-    #)
+    model = load_lora_adapter(
+        model,
+        config,
+    )
     print("=" * 80)
     print("MODEL TYPE")
     print(model.peft_config)
@@ -681,10 +681,10 @@ def main() -> None:
     )
 
     # TEMPORARY TEST
-    # model = load_lora_adapter(
-    #     model,
-    #     config,
-    # )
+    model = load_lora_adapter(
+        model,
+        config,
+    )
 
     interactive_chat(
         model=model,

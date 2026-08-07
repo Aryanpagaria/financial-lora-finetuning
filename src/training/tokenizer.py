@@ -1,180 +1,58 @@
 from typing import Any
-from src.data.preprocessing import get_preprocessed_dataset
-import yaml
-from transformers import AutoTokenizer, PreTrainedTokenizer
-from src.utils.config_loader import load_configs
-import os 
+from pathlib import Path
+from transformers import (
+    AutoTokenizer,
+    PreTrainedTokenizer,
+)
+
+from src.data.preprocessing import (
+    get_preprocessed_dataset,
+)
+
+from src.utils.config_loader import (
+    load_configs,
+)
+TokenizedDataset = dict[
+    str,
+    list[dict[str, Any]],
+]
 
 
-def _configure_tokenizer(config: dict[str, Any]) -> PreTrainedTokenizer:
-    """Load and configure the tokenizer."""
+def _configure_tokenizer(
+    config: dict[str, Any],
+) -> PreTrainedTokenizer:
+    """
+    Load and configure the tokenizer.
+    """
 
-    model_name = config["model"]["name"]
+    tokenizer = AutoTokenizer.from_pretrained(
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+        config["model"]["name"],
 
-    tokenizer.padding_side = config["tokenizer"]["padding_side"]
+        trust_remote_code=True,
+
+    )
+
+    tokenizer.padding_side = (
+        config["tokenizer"][
+            "padding_side"
+        ]
+    )
 
     if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+
+        tokenizer.pad_token = (
+            tokenizer.eos_token
+        )
 
     return tokenizer
 
-
-
-
-
-def _tokenize_sample(
-    sample: dict[str, str],
-    tokenizer: PreTrainedTokenizer,
-    max_length: int,
-) -> dict[str, Any]:
-    """Tokenize a single training sample."""
-
-    prompt_encoding = tokenizer(
-        sample["prompt"],
-        truncation=True,
-        max_length=max_length,
-        padding="max_length",
-    )
-
-    target_encoding = tokenizer(
-        sample["target"],
-        truncation=True,
-        max_length=max_length,
-        padding="max_length",
-    )
-
-    return {
-        "input_ids": prompt_encoding["input_ids"],
-        "attention_mask": prompt_encoding["attention_mask"],
-        "labels": target_encoding["input_ids"],
-        "id": sample["id"],
-        "filename": sample["filename"],
-    }
-
-
-def _tokenize_split(
-    split: list[dict[str, str]],
-    tokenizer: PreTrainedTokenizer,
-    max_length: int,
-) -> list[dict[str, Any]]:
-    """Tokenize all samples in a dataset split."""
-
-    tokenized_split = []
-
-    for sample in split:
-        tokenized_split.append(
-            _tokenize_sample(
-                sample,
-                tokenizer,
-                max_length,
-            )
-        )
-
-    return tokenized_split
-
-
-
-
-def get_tokenized_dataset() -> dict[str, list[dict[str, Any]]]:
-    """Return the tokenized dataset."""
-
-    config = load_configs()
-
-    tokenizer = get_tokenizer()
-
-    dataset = get_preprocessed_dataset()
-
-    max_length = config["training"]["max_seq_length"]
-
-    tokenized_dataset = {}
-
-    for split_name, split in dataset.items():
-
-        tokenized_dataset[split_name] = _tokenize_split(
-            split,
-            tokenizer,
-            max_length,
-        )
-
-    return tokenized_dataset
-
-if __name__ == "__main__":
-
-    dataset = get_tokenized_dataset()
-
-    sample = dataset["train"][0]
-
-    print("=" * 80)
-    print("TOKENIZED SAMPLE")
-    print("=" * 80)
-
-    print("Input IDs:")
-    print(sample["input_ids"][:20])
-
-    print()
-
-    print("Attention Mask:")
-    print(sample["attention_mask"][:20])
-
-    print()
-
-    print("Labels:")
-    print(sample["labels"][:20])
-
-
-def print_tokenizer_info(
-    tokenizer: PreTrainedTokenizer,
-) -> None:
-    """
-    Print tokenizer configuration.
-    """
-
-    print("=" * 80)
-    print("TOKENIZER INFORMATION")
-    print("=" * 80)
-
-    print(
-        f"Tokenizer Class : {tokenizer.__class__.__name__}"
-    )
-
-    print(
-        f"Vocabulary Size : {len(tokenizer)}"
-    )
-
-    print(
-        f"Padding Side    : {tokenizer.padding_side}"
-    )
-
-    print(
-        f"Pad Token       : {tokenizer.pad_token}"
-    )
-
-    print(
-        f"EOS Token       : {tokenizer.eos_token}"
-    )
-
-    print(
-        f"BOS Token       : {tokenizer.bos_token}"
-    )
-
-    print(
-        f"UNK Token       : {tokenizer.unk_token}"
-    )
-
-    print(
-        f"Model Max Length: {tokenizer.model_max_length}"
-    )
-
-    print("=" * 80)
 
 def sanity_check_tokenizer(
     tokenizer: PreTrainedTokenizer,
 ) -> None:
     """
-    Validate tokenizer configuration before
-    training.
+    Validate tokenizer configuration.
     """
 
     if tokenizer.pad_token is None:
@@ -199,56 +77,53 @@ def sanity_check_tokenizer(
     print("TOKENIZER SANITY CHECK PASSED")
     print("=" * 80)
 
-def save_tokenizer(
+
+def print_tokenizer_info(
     tokenizer: PreTrainedTokenizer,
 ) -> None:
     """
-    Save tokenizer for inference.
+    Display tokenizer information.
     """
 
-    config = load_configs()
+    print("=" * 80)
+    print("TOKENIZER INFORMATION")
+    print("=" * 80)
 
-    save_directory = (
-        config["checkpoint"][
-            "lora_export_directory"
-        ]
-    )
-
-    os.makedirs(
-        save_directory,
-        exist_ok=True,
-    )
-
-    tokenizer.save_pretrained(
-        save_directory,
+    print(
+        f"Tokenizer : "
+        f"{tokenizer.__class__.__name__}"
     )
 
     print(
-        f"\nTokenizer saved to:\n{save_directory}"
+        f"Vocabulary : "
+        f"{len(tokenizer):,}"
     )
 
-def load_saved_tokenizer(
+    print(
+        f"Padding Side : "
+        f"{tokenizer.padding_side}"
+    )
+
+    print(
+        f"Pad Token : "
+        f"{tokenizer.pad_token}"
+    )
+
+    print(
+        f"EOS Token : "
+        f"{tokenizer.eos_token}"
+    )
+
+    print(
+        f"Model Max Length : "
+        f"{tokenizer.model_max_length}"
+    )
+
+    print("=" * 80)
+
+
+def get_tokenizer(
 ) -> PreTrainedTokenizer:
-    """
-    Load exported tokenizer.
-    """
-
-    config = load_configs()
-
-    save_directory = (
-        config["checkpoint"][
-            "lora_export_directory"
-        ]
-    )
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        save_directory,
-    )
-
-    return tokenizer
-
-
-def get_tokenizer() -> PreTrainedTokenizer:
     """
     Return a configured tokenizer.
     """
@@ -268,3 +143,575 @@ def get_tokenizer() -> PreTrainedTokenizer:
     )
 
     return tokenizer
+
+
+
+
+
+
+
+
+def _tokenize_split(
+    split: list[dict[str, Any]],
+    tokenizer: PreTrainedTokenizer,
+    max_length: int,
+) -> list[dict[str, Any]]:
+    """
+    Tokenize an entire dataset split.
+    """
+
+    tokenized_split = []
+
+    for sample in split:
+
+        tokenized_split.append(
+
+            _tokenize_sample(
+
+                sample,
+
+                tokenizer,
+
+                max_length,
+
+            )
+
+        )
+
+    return tokenized_split
+
+def get_tokenized_dataset(
+) -> TokenizedDataset:
+    """
+    Return the complete
+    tokenized dataset.
+    """
+
+    config = load_configs()
+
+    tokenizer = get_tokenizer()
+
+    dataset = get_preprocessed_dataset()
+
+    max_length = (
+        config["training"][
+            "max_seq_length"
+        ]
+    )
+
+    tokenized_dataset: TokenizedDataset = {}
+
+    for split_name, split in dataset.items():
+
+        tokenized_dataset[
+            split_name
+        ] = _tokenize_split(
+
+            split,
+
+            tokenizer,
+
+            max_length,
+
+        )
+
+    print_dataset_statistics(
+        tokenized_dataset,
+    )
+
+    return tokenized_dataset
+
+def save_tokenizer(
+    tokenizer: PreTrainedTokenizer,
+) -> None:
+    """
+    Save tokenizer for inference.
+    """
+
+    config = load_configs()
+
+    save_directory = Path(
+
+        config["checkpoint"][
+            "lora_export_directory"
+        ]
+
+    )
+
+    save_directory.mkdir(
+
+        parents=True,
+
+        exist_ok=True,
+
+    )
+
+    tokenizer.save_pretrained(
+        save_directory,
+    )
+
+    print("=" * 80)
+    print("TOKENIZER SAVED")
+    print("=" * 80)
+    print(save_directory)
+    print("=" * 80)
+
+
+
+
+def load_saved_tokenizer(
+) -> PreTrainedTokenizer:
+    """
+    Load exported tokenizer.
+    """
+
+    config = load_configs()
+
+    tokenizer = AutoTokenizer.from_pretrained(
+
+        config["checkpoint"][
+            "lora_export_directory"
+        ],
+
+        trust_remote_code=True,
+
+    )
+
+    return tokenizer
+
+
+def print_dataset_statistics(
+    dataset: TokenizedDataset,
+) -> None:
+    """
+    Print tokenized dataset statistics.
+    """
+
+    print("=" * 80)
+    print("TOKENIZED DATASET")
+    print("=" * 80)
+
+    total = 0
+
+    for split_name, split in dataset.items():
+
+        print(
+            f"{split_name:<12}: "
+            f"{len(split):,} samples"
+        )
+
+        total += len(split)
+
+    print("-" * 80)
+
+    print(
+        f"Total Samples : {total:,}"
+    )
+
+    print("=" * 80)
+
+
+
+def _build_prompt_messages(
+    messages: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """
+    Return only the system and user
+    messages.
+
+    These form the prompt presented
+    to the language model.
+    """
+
+    prompt_messages: list[
+        dict[str, str]
+    ] = []
+
+    for message in messages:
+
+        if message["role"] == "assistant":
+
+            break
+
+        prompt_messages.append(
+            message
+        )
+
+    return prompt_messages
+
+
+def _build_answer_message(
+    messages: list[dict[str, str]],
+) -> str:
+    """
+    Return the assistant response
+    used as the training target.
+    """
+
+    for message in messages:
+
+        if message["role"] == "assistant":
+
+            return message[
+                "content"
+            ]
+
+    raise RuntimeError(
+        "Assistant response missing."
+    )
+
+
+
+def _tokenize_prompt(
+    tokenizer: PreTrainedTokenizer,
+    prompt_messages: list[
+        dict[str, str]
+    ],
+) -> list[int]:
+    """
+    Tokenize the prompt
+    (system + user).
+    """
+
+    prompt_text = tokenizer.apply_chat_template(
+
+        conversation=prompt_messages,
+
+        tokenize=False,
+
+        add_generation_prompt=True,
+
+    )
+
+    prompt_ids = tokenizer(
+
+        prompt_text,
+
+        add_special_tokens=False,
+
+    )[
+        "input_ids"
+    ]
+
+    return prompt_ids
+
+
+def _tokenize_answer(
+    tokenizer: PreTrainedTokenizer,
+    answer: str,
+) -> list[int]:
+    """
+    Tokenize the assistant answer.
+    """
+
+    answer_ids = tokenizer(
+
+        answer,
+
+        add_special_tokens=False,
+
+    )[
+        "input_ids"
+    ]
+
+    answer_ids.append(
+        tokenizer.eos_token_id
+    )
+
+    return answer_ids
+
+
+
+
+def _tokenize_sample(
+    sample: dict[str, Any],
+    tokenizer: PreTrainedTokenizer,
+    max_length: int,
+) -> dict[str, Any]:
+    """
+    Tokenize one training conversation.
+    """
+
+    prompt_messages = (
+        _build_prompt_messages(
+            sample["messages"]
+        )
+    )
+
+    answer = (
+        _build_answer_message(
+            sample["messages"]
+        )
+    )
+
+    prompt_ids = (
+        _tokenize_prompt(
+            tokenizer,
+            prompt_messages,
+        )
+    )
+
+    answer_ids = (
+        _tokenize_answer(
+            tokenizer,
+            answer,
+        )
+    )
+
+    input_ids = (
+        prompt_ids
+        + answer_ids
+    )
+
+    attention_mask = (
+        [1]
+        * len(input_ids)
+    )
+
+    labels = (
+        [-100]
+        * len(prompt_ids)
+        + answer_ids
+    )
+
+    input_ids = input_ids[
+        :max_length
+    ]
+
+    attention_mask = attention_mask[
+        :max_length
+    ]
+
+    labels = labels[
+        :max_length
+    ]
+
+    padding = (
+        max_length
+        - len(input_ids)
+    )
+
+    if padding > 0:
+
+        input_ids.extend(
+
+            [
+                tokenizer.pad_token_id
+            ]
+            * padding
+
+        )
+
+        attention_mask.extend(
+
+            [0]
+            * padding
+
+        )
+
+        labels.extend(
+
+            [-100]
+            * padding
+
+        )
+
+    return {
+
+        "id": sample["id"],
+
+        "filename": sample["filename"],
+
+        "messages": sample["messages"],
+
+        "input_ids": input_ids,
+
+        "attention_mask": attention_mask,
+
+        "labels": labels,
+
+    }
+
+def preview_training_labels(
+    tokenizer: PreTrainedTokenizer,
+    labels: list[int],
+) -> None:
+    """
+    Display only the tokens that
+    contribute to the training loss.
+    """
+
+    answer_tokens = [
+
+        token
+
+        for token in labels
+
+        if token != -100
+
+    ]
+
+    print("=" * 80)
+    print("TRAINING LABELS")
+    print("=" * 80)
+
+    print(
+
+        tokenizer.decode(
+
+            answer_tokens,
+
+            skip_special_tokens=False,
+
+        )
+
+    )
+
+    print("=" * 80)
+
+
+
+
+if __name__ == "__main__":
+
+    tokenizer = get_tokenizer()
+
+    tokenized_dataset = (
+        get_tokenized_dataset()
+    )
+
+    save_tokenizer(
+        tokenizer,
+    )
+
+    sample = tokenized_dataset[
+        "train"
+    ][0]
+
+    print("=" * 80)
+    print("TOKENIZED SAMPLE")
+    print("=" * 80)
+
+    print(
+        f"Input Length      : {len(sample['input_ids'])}"
+    )
+
+    print(
+        f"Attention Length  : {len(sample['attention_mask'])}"
+    )
+
+    print(
+        f"Label Length      : {len(sample['labels'])}"
+    )
+
+    print()
+
+    print("=" * 80)
+    print("FULL CONVERSATION")
+    print("=" * 80)
+
+    print(
+
+        tokenizer.decode(
+
+            sample["input_ids"],
+
+            skip_special_tokens=False,
+
+        )
+
+    )
+
+    print()
+
+    preview_training_labels(
+
+        tokenizer,
+
+        sample["labels"],
+
+    )
+
+
+    print()
+
+    prompt_messages = _build_prompt_messages(
+        sample["messages"],
+    )
+
+    prompt_ids = _tokenize_prompt(
+        tokenizer,
+        prompt_messages,
+    )
+
+    answer = _build_answer_message(
+        sample["messages"],
+    )
+
+    answer_ids = _tokenize_answer(
+        tokenizer,
+        answer,
+    )
+
+    print("=" * 80)
+    print("TOKEN STATISTICS")
+    print("=" * 80)
+
+    print(
+        f"Prompt Tokens    : {len(prompt_ids)}"
+    )
+
+    print(
+        f"Answer Tokens    : {len(answer_ids)}"
+    )
+
+    print(
+        f"Total Tokens     : {len(prompt_ids) + len(answer_ids)}"
+    )
+
+    print(
+        f"Maximum Length   : 512"
+    )
+
+    print("=" * 80)
+    print()
+    print("=" * 80)
+    print("PROMPT TOKENS")
+    print("=" * 80)
+
+    prompt_messages = _build_prompt_messages(
+        sample["messages"],
+    )
+
+    prompt_ids = _tokenize_prompt(
+        tokenizer,
+        prompt_messages,
+    )
+
+    print(len(prompt_ids))
+
+    print()
+
+    answer = _build_answer_message(
+        sample["messages"],
+    )
+
+    answer_ids = _tokenize_answer(
+        tokenizer,
+        answer,
+    )
+
+    print("=" * 80)
+    print("ANSWER TOKENS")
+    print("=" * 80)
+
+    print(len(answer_ids))
+
+    print()
+
+    print("=" * 80)
+    print("TOTAL TOKENS")
+    print("=" * 80)
+    
+
+    print(len(prompt_ids) + len(answer_ids))

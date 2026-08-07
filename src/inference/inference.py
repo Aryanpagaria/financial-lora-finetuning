@@ -12,7 +12,7 @@ from transformers import (
     BitsAndBytesConfig,
 
 )
-
+import time
 
 
 def load_inference_config() -> dict[str, Any]:
@@ -355,7 +355,7 @@ def interactive_chat(
 
 
 
-import time
+
 
 
 def generate_response(

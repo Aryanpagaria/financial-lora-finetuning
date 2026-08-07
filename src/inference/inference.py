@@ -353,6 +353,137 @@ def interactive_chat(
 
         print("-" * 80)
 
+
+
+import time
+
+
+def generate_response(
+    model: Any,
+    tokenizer: Any,
+    prompt: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Generate a response and return inference statistics.
+    """
+
+    generation = config[
+        "generation"
+    ]
+
+    device = next(
+        model.parameters()
+    ).device
+
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+    )
+
+    inputs = {
+        key: value.to(device)
+        for key, value in inputs.items()
+    }
+
+    prompt_tokens = inputs[
+        "input_ids"
+    ].shape[-1]
+
+    start_time = time.perf_counter()
+
+    with torch.no_grad():
+
+        outputs = model.generate(
+
+            **inputs,
+
+            max_new_tokens=generation[
+                "max_new_tokens"
+            ],
+
+            temperature=generation[
+                "temperature"
+            ],
+
+            top_p=generation[
+                "top_p"
+            ],
+
+            top_k=generation[
+                "top_k"
+            ],
+
+            do_sample=generation[
+                "do_sample"
+            ],
+
+            repetition_penalty=generation[
+                "repetition_penalty"
+            ],
+
+            num_beams=generation[
+                "num_beams"
+            ],
+
+            use_cache=generation[
+                "use_cache"
+            ],
+
+            pad_token_id=tokenizer.pad_token_id,
+
+            eos_token_id=tokenizer.eos_token_id,
+        )
+
+    end_time = time.perf_counter()
+
+    generated_tokens = outputs[
+        0
+    ][
+        prompt_tokens:
+    ]
+
+    response = tokenizer.decode(
+        generated_tokens,
+        skip_special_tokens=True,
+    ).strip()
+
+    generated_token_count = (
+        generated_tokens.shape[-1]
+    )
+
+    generation_time = (
+        end_time - start_time
+    )
+
+    tokens_per_second = (
+        generated_token_count
+        / generation_time
+        if generation_time > 0
+        else 0.0
+    )
+
+    return {
+
+        "response": response,
+
+        "prompt_tokens": prompt_tokens,
+
+        "generated_tokens": generated_token_count,
+
+        "generation_time": generation_time,
+
+        "tokens_per_second": tokens_per_second,
+
+        "temperature": generation[
+            "temperature"
+        ],
+
+        "top_p": generation[
+            "top_p"
+        ],
+    }
+
 def test_inference(
     question: str,
 ) -> None:

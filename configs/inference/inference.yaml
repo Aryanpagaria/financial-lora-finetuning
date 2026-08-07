@@ -30,3 +30,4 @@ chat:
     - q
 
     - bye
+  max_history: 12

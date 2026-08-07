@@ -10,6 +10,7 @@ from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     BitsAndBytesConfig,
+
 )
 
 
@@ -77,20 +78,17 @@ def load_inference_config() -> dict[str, Any]:
 
 
 
-
 def load_tokenizer(
     config: dict[str, Any],
 ):
     """
-    Load the tokenizer used during training.
+    Load the tokenizer exported with the LoRA adapter.
     """
 
-    model_name = (
-        config["model"]["name"]
-    )
-
     tokenizer = AutoTokenizer.from_pretrained(
-        pretrained_model_name_or_path=model_name,
+        config["checkpoint"][
+            "lora_export_directory"
+        ],
         trust_remote_code=True,
     )
 
@@ -107,19 +105,11 @@ def load_tokenizer(
     print("=" * 80)
     print("TOKENIZER LOADED")
     print("=" * 80)
-    print(
-        f"Vocabulary Size : "
-        f"{len(tokenizer)}"
-    )
-    print(
-        f"Padding Side    : "
-        f"{tokenizer.padding_side}"
-    )
+    print(f"Vocabulary Size : {len(tokenizer)}")
+    print(f"Padding Side    : {tokenizer.padding_side}")
     print("=" * 80)
 
     return tokenizer
-
-
 
 
 
@@ -171,7 +161,7 @@ def load_model(
     )
 
     model.eval()
-    torch.set_grad_enabled(False)
+    model.config.use_cache = True
 
     for parameter in model.parameters():
 
@@ -230,186 +220,14 @@ def load_lora_adapter(
 
 
 
-def prepare_prompt(
-    tokenizer: Any,
-    user_prompt: str,
-) -> str:
-    """
-    Convert a user query into the
-    chat template expected by Qwen.
-    """
-
-    messages = [
-        {
-            "role": "system",
-            "content":
-            (
-                "You are a helpful "
-                "financial assistant."
-            ),
-        },
-        {
-            "role": "user",
-            "content": user_prompt,
-        },
-    ]
-
-    prompt = tokenizer.apply_chat_template(
-        conversation=messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-
-    return prompt
-
-
-
-
-
-def generate_response(
-    model: Any,
-    tokenizer: Any,
-    prompt: str,
-    config: dict[str, Any],
-) -> str:
-    """
-    Generate a response using
-    the fine-tuned LoRA model.
-    """
-
-    generation = config[
-        "generation"
-    ]
-
-    device = next(
-        model.parameters()
-    ).device
-
-    inputs = tokenizer(
-        prompt,
-        return_tensors="pt",
-    )
-
-    inputs = {
-        key: value.to(device)
-        for key, value
-        in inputs.items()
-    }
-
-    with torch.no_grad():
-
-        outputs = model.generate(
-
-            **inputs,
-
-            max_new_tokens=
-            generation[
-                "max_new_tokens"
-            ],
-
-            temperature=
-            generation[
-                "temperature"
-            ],
-
-            top_p=
-            generation[
-                "top_p"
-            ],
-
-            top_k=
-            generation[
-                "top_k"
-            ],
-
-            do_sample=
-            generation[
-                "do_sample"
-            ],
-
-            repetition_penalty=
-            generation[
-                "repetition_penalty"
-            ],
-
-            num_beams=
-            generation[
-                "num_beams"
-            ],
-
-            use_cache=
-            generation[
-                "use_cache"
-            ],
-
-            pad_token_id=
-            tokenizer.pad_token_id,
-
-            eos_token_id=
-            tokenizer.eos_token_id,
-        )
-
-    generated_tokens = outputs[
-        0
-    ][
-        inputs[
-            "input_ids"
-        ].shape[-1]:
-    ]
-
-    response = tokenizer.decode(
-        generated_tokens,
-        skip_special_tokens=True,
-    )
-
-    return response.strip()
-
-
-
-
-
-
-def build_messages(
-    history: list[dict[str, str]],
-    user_prompt: str,
-) -> list[dict[str, str]]:
-    """
-    Build the complete conversation history.
-    """
-
-    if not history:
-
-        history.append(
-            {
-                "role": "system",
-                "content":
-                (
-                    "You are a helpful financial "
-                    "assistant."
-                ),
-            }
-        )
-
-    history.append(
-        {
-            "role": "user",
-            "content": user_prompt,
-        }
-    )
-
-    return history
-
-
-
-
 
 def interactive_chat(
-    model,
-    tokenizer,
-    config,
+    model: Any,
+    tokenizer: Any,
+    config: dict[str, Any],
 ) -> None:
     """
-    Interactive command-line chat.
+    Interactive CLI chat.
     """
 
     logger = get_logger(
@@ -457,12 +275,16 @@ def interactive_chat(
             add_generation_prompt=True,
         )
 
-        response = generate_response(
+        result = generate_response(
             model=model,
             tokenizer=tokenizer,
             prompt=prompt,
             config=config,
         )
+
+        response = result[
+            "response"
+        ]
 
         history.append(
             {
@@ -470,6 +292,16 @@ def interactive_chat(
                 "content": response,
             }
         )
+        max_history = config["chat"][
+            "max_history"
+        ]
+
+        if len(history) > max_history:
+
+            history = [
+                history[0],
+                *history[-(max_history - 1):]
+            ]
 
         logger.info(
             f"User: {user_prompt}"
@@ -479,19 +311,88 @@ def interactive_chat(
             f"Assistant: {response}"
         )
 
+        print("\nAssistant:\n")
+
+        print(response)
+
+        print()
+
+        print("-" * 80)
+        print("Generation Statistics")
+        print("-" * 80)
+
         print(
-            "\nAssistant:\n"
+            f"Prompt Tokens    : "
+            f"{result['prompt_tokens']}"
         )
 
         print(
-            response,
+            f"Generated Tokens : "
+            f"{result['generated_tokens']}"
         )
+
+        print(
+            f"Generation Time  : "
+            f"{result['generation_time']:.2f} sec"
+        )
+
+        print(
+            f"Tokens / Second  : "
+            f"{result['tokens_per_second']:.2f}"
+        )
+
+        print(
+            f"Temperature      : "
+            f"{result['temperature']}"
+        )
+
+        print(
+            f"Top-p            : "
+            f"{result['top_p']}"
+        )
+
+        print("-" * 80)
+
+
+def build_messages(
+    history: list[dict[str, str]],
+    user_prompt: str,
+) -> list[dict[str, str]]:
+    """
+    Build the complete conversation history.
+    """
+
+    if not history:
+
+        history.append(
+            {
+                "role": "system",
+                "content":
+                (
+                    "You are a helpful financial "
+                    "assistant."
+                ),
+            }
+        )
+
+    history.append(
+        {
+            "role": "user",
+            "content": user_prompt,
+        }
+    )
+
+    return history
+
+
+
+
+
+
+
 
 
 def main() -> None:
-    """
-    Entry point for inference.
-    """
 
     config = load_inference_config()
 
@@ -518,4 +419,3 @@ def main() -> None:
 if __name__ == "__main__":
 
     main()
-

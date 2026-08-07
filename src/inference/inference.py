@@ -92,6 +92,19 @@ def load_tokenizer(
         trust_remote_code=True,
     )
 
+    print("=" * 80)
+    print("TOKENIZER SPECIAL TOKENS")
+    print("=" * 80)
+
+    print(tokenizer.special_tokens_map)
+
+    print("EOS Token     :", tokenizer.eos_token)
+    print("EOS Token ID  :", tokenizer.eos_token_id)
+    print("PAD Token     :", tokenizer.pad_token)
+    print("PAD Token ID  :", tokenizer.pad_token_id)
+    print("BOS Token     :", tokenizer.bos_token)
+    print("BOS Token ID  :", tokenizer.bos_token_id)
+
     tokenizer.padding_side = (
         config["tokenizer"]["padding_side"]
     )
@@ -526,6 +539,10 @@ def test_inference(
         model,
         config,
     )
+    print("=" * 80)
+    print("MODEL TYPE")
+    print("=" * 80)
+    print(type(model))
 
     history = []
 
@@ -539,6 +556,19 @@ def test_inference(
         tokenize=False,
         add_generation_prompt=True,
     )
+    print("="*80)
+    print("PROMPT")
+    print("="*80)
+    print(prompt)
+    print(tokenizer.special_tokens_map)
+
+    print(tokenizer.eos_token)
+
+    print(tokenizer.eos_token_id)
+
+    print(tokenizer.pad_token)
+
+    print(tokenizer.pad_token_id)
 
     result = generate_response(
         model=model,

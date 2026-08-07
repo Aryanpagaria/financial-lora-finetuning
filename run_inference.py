@@ -1,22 +1,10 @@
 def main() -> None:
 
-    config = load_inference_config()
-
-    tokenizer = load_tokenizer(
-        config,
+    test_inference(
+        "What is ROI?"
     )
 
-    model = load_model(
-        config,
-    )
 
-    model = load_lora_adapter(
-        model,
-        config,
-    )
+if __name__ == "__main__":
 
-    interactive_chat(
-        model=model,
-        tokenizer=tokenizer,
-        config=config,
-    )
+    main()

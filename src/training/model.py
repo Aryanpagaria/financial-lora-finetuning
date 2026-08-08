@@ -2,268 +2,374 @@ from typing import Any
 
 import torch
 
+from peft import (
+    LoraConfig,
+    PeftModel,
+    get_peft_model,
+    prepare_model_for_kbit_training,
+)
+
 from transformers import (
     AutoModelForCausalLM,
     BitsAndBytesConfig,
-)
-
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    prepare_model_for_kbit_training,
+    PreTrainedModel,
 )
 
 from src.utils.config_loader import load_configs
 
 
-def _load_quantization_config() -> BitsAndBytesConfig:
+ModelConfig = dict[str, Any]
+
+
+def _load_model_config() -> ModelConfig:
     """
-    Create the BitsAndBytes quantization configuration.
+    Load the complete project configuration.
+
+    Returns:
+        The project configuration dictionary.
     """
 
     config = load_configs()
 
-    quantization = config["quantization"]
+    if "model" not in config:
+        raise KeyError(
+            "Missing 'model' configuration."
+        )
+
+    if "quantization" not in config:
+        raise KeyError(
+            "Missing 'quantization' configuration."
+        )
+
+    if "lora" not in config:
+        raise KeyError(
+            "Missing 'lora' configuration."
+        )
+
+    return config
+
+
+
+
+def _build_quantization_config(
+    config: ModelConfig,
+) -> BitsAndBytesConfig:
+    """
+    Build the BitsAndBytes configuration used
+    for QLoRA 4-bit quantization.
+    """
+
+    quantization = config[
+        "quantization"
+    ]
+
+    required_keys = {
+        "load_in_4bit",
+        "bnb_4bit_quant_type",
+        "bnb_4bit_compute_dtype",
+        "bnb_4bit_use_double_quant",
+    }
+
+    missing_keys = (
+        required_keys
+        - quantization.keys()
+    )
+
+    if missing_keys:
+        raise KeyError(
+            "Missing quantization configuration "
+            f"keys: {sorted(missing_keys)}"
+        )
+
+    compute_dtype_name = quantization[
+        "bnb_4bit_compute_dtype"
+    ]
+
+    if not isinstance(
+        compute_dtype_name,
+        str,
+    ):
+        raise TypeError(
+            "bnb_4bit_compute_dtype must be "
+            "a string."
+        )
+
+    if not hasattr(
+        torch,
+        compute_dtype_name,
+    ):
+        raise ValueError(
+            "Unsupported torch compute dtype: "
+            f"{compute_dtype_name}"
+        )
 
     compute_dtype = getattr(
         torch,
-        quantization["bnb_4bit_compute_dtype"],
+        compute_dtype_name,
     )
 
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=quantization["load_in_4bit"],
-        bnb_4bit_quant_type=quantization["bnb_4bit_quant_type"],
+    return BitsAndBytesConfig(
+        load_in_4bit=bool(
+            quantization[
+                "load_in_4bit"
+            ]
+        ),
+        bnb_4bit_quant_type=str(
+            quantization[
+                "bnb_4bit_quant_type"
+            ]
+        ),
         bnb_4bit_compute_dtype=compute_dtype,
-        bnb_4bit_use_double_quant=quantization[
-            "bnb_4bit_use_double_quant"
-        ],
+        bnb_4bit_use_double_quant=bool(
+            quantization[
+                "bnb_4bit_use_double_quant"
+            ]
+        ),
     )
 
-    return quantization_config
 
 
-def _load_model(
-    quantization_config: BitsAndBytesConfig,
-) -> Any:
+def _build_lora_config(
+    config: ModelConfig,
+) -> LoraConfig:
     """
-    Load the base language model.
-
-    If a CUDA-enabled GPU is available, load the model
-    using 4-bit quantization for QLoRA training.
-
-    Otherwise, load the model on the CPU for
-    development and testing.
+    Build the LoRA configuration used
+    for parameter-efficient fine-tuning.
     """
-
-    config = load_configs()
-
-    model_name = config["model"]["name"]
-
-    if torch.cuda.is_available():
-
-        print("=" * 80)
-        print("LOADING MODEL (GPU MODE)")
-        print("=" * 80)
-
-        model = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=model_name,
-            quantization_config=quantization_config,
-            device_map="auto",
-            trust_remote_code=True,
-        )
-
-    else:
-
-        print("=" * 80)
-        print("LOADING MODEL (CPU MODE)")
-        print("=" * 80)
-        print(
-            "CUDA is not available. "
-            "Loading the model without 4-bit quantization."
-        )
-
-        model = AutoModelForCausalLM.from_pretrained(
-            pretrained_model_name_or_path=model_name,
-            dtype=torch.float32,
-            trust_remote_code=True,
-        )
-
-    return model
-
-def enable_training_optimizations(
-    model: Any,
-) -> Any:
-    """
-    Enable training optimizations.
-    """
-
-    model.config.use_cache = False
-
-    model.gradient_checkpointing_enable(
-        gradient_checkpointing_kwargs={
-            "use_reentrant": False,
-        }
-    )
-
-    model.enable_input_require_grads()
-
-    model.train()
-
-    return model
-
-
-def _create_lora_config() -> LoraConfig:
-    """
-    Create the LoRA configuration.
-    """
-
-    config = load_configs()
 
     lora = config["lora"]
 
-    lora_config = LoraConfig(
-        r=lora["r"],
-        lora_alpha=lora["alpha"],
-        lora_dropout=lora["dropout"],
-        bias=lora["bias"],
+    required_keys = {
+        "r",
+        "alpha",
+        "dropout",
+        "bias",
+        "target_modules",
+    }
+
+    missing_keys = (
+        required_keys
+        - lora.keys()
+    )
+
+    if missing_keys:
+        raise KeyError(
+            "Missing LoRA configuration "
+            f"keys: {sorted(missing_keys)}"
+        )
+
+    rank = int(lora["r"])
+
+    if rank <= 0:
+        raise ValueError(
+            "LoRA rank must be greater than zero."
+        )
+
+    alpha = float(
+        lora["alpha"]
+    )
+
+    if alpha <= 0:
+        raise ValueError(
+            "LoRA alpha must be greater than zero."
+        )
+
+    dropout = float(
+        lora["dropout"]
+    )
+
+    if not 0.0 <= dropout < 1.0:
+        raise ValueError(
+            "LoRA dropout must be in "
+            "the range [0, 1)."
+        )
+
+    target_modules = lora[
+        "target_modules"
+    ]
+
+    if not isinstance(
+        target_modules,
+        list,
+    ) or not target_modules:
+        raise ValueError(
+            "LoRA target_modules must be "
+            "a non-empty list."
+        )
+
+    return LoraConfig(
+        r=rank,
+        lora_alpha=alpha,
+        lora_dropout=dropout,
+        bias=str(
+            lora["bias"]
+        ),
         task_type="CAUSAL_LM",
-        target_modules=lora["target_modules"],
+        target_modules=target_modules,
     )
 
-    return lora_config
 
-
-def _apply_peft(
-    model: Any,
-    lora_config: LoraConfig,
-) -> Any:
-    """
-    Apply LoRA adapters.
-    """
-
-    model = get_peft_model(
-        model=model,
-        peft_config=lora_config,
-    )
-
-    return model
-
-
-def print_trainable_parameters(
-    model: Any,
+def _validate_runtime(
+    config: ModelConfig,
 ) -> None:
     """
-    Print trainable parameter statistics.
+    Validate the runtime environment required
+    for the configured QLoRA training setup.
     """
 
-    trainable_params = 0
-    total_params = 0
+    quantization = config["quantization"]
 
-    for parameter in model.parameters():
-
-        total_params += parameter.numel()
-
-        if parameter.requires_grad:
-
-            trainable_params += parameter.numel()
-
-    percentage = (
-        100 * trainable_params / total_params
+    load_in_4bit = bool(
+        quantization["load_in_4bit"]
     )
 
-    print("=" * 80)
-    print("TRAINABLE PARAMETERS")
-    print("=" * 80)
-    print(f"Trainable Parameters : {trainable_params:,}")
-    print(f"Total Parameters     : {total_params:,}")
-    print(f"Trainable Percentage : {percentage:.4f}%")
-    print("=" * 80)
+    if load_in_4bit and not torch.cuda.is_available():
+        raise RuntimeError(
+            "4-bit QLoRA training requires a "
+            "CUDA-enabled GPU in the current "
+            "training configuration."
+        )
+
+    if load_in_4bit:
+        cuda_device_count = torch.cuda.device_count()
+
+        if cuda_device_count < 1:
+            raise RuntimeError(
+                "CUDA was reported as unavailable "
+                "despite 4-bit quantization being enabled."
+            )
+
+        print("=" * 80)
+        print("RUNTIME VALIDATION")
+        print("=" * 80)
+        print(
+            f"CUDA Devices : {cuda_device_count}"
+        )
+        print(
+            f"CUDA Device  : "
+            f"{torch.cuda.get_device_name(0)}"
+        )
+        print(
+            f"CUDA Version : "
+            f"{torch.version.cuda}"
+        )
+        print("=" * 80)
 
 
-def get_model() -> Any:
+
+def _load_base_model(
+    config: ModelConfig,
+    quantization_config: BitsAndBytesConfig,
+) -> PreTrainedModel:
     """
-    Build and return a PEFT-enabled language model
-    ready for QLoRA fine-tuning.
-    """
+    Load the base causal language model.
 
-    quantization_config = _load_quantization_config()
-
-    model = _load_model(
-        quantization_config,
-    )
-
-    model = _prepare_model(
-        model,
-    )
-
-    model = configure_model(
-        model,
-    )
-
-    lora_config = _create_lora_config()
-
-    model = _apply_peft(
-        model,
-        lora_config,
-    )
-
-    model = enable_training_optimizations(
-        model,
-    )
-
-    sanity_check_model(
-        model,
-    )
-
-    print_model_summary(
-        model,
-    )
-
-
-    print_trainable_parameters(
-        model,
-    )
-
-    print_model_memory(
-        model,
-    )
-
-    return model
-
-def print_model_summary(
-    model: Any,
-) -> None:
-    """
-    Display a summary of the loaded model and
-    training configuration.
+    The model is loaded without LoRA adapters.
+    LoRA is applied in a separate step so that
+    model construction remains explicit and testable.
     """
 
-    config = load_configs()
+    model_name = config["model"]["name"]
+
+    if not isinstance(
+        model_name,
+        str,
+    ) or not model_name.strip():
+        raise ValueError(
+            "Model name must be a non-empty string."
+        )
 
     print("=" * 80)
-    print("MODEL SUMMARY")
+    print("LOADING BASE MODEL")
     print("=" * 80)
-    print(f"Base Model      : {config['model']['name']}")
-    print(f"Quantization    : 4-bit")
-    print(f"Quant Type      : {config['quantization']['bnb_4bit_quant_type']}")
-    print(f"Compute Dtype   : {config['quantization']['bnb_4bit_compute_dtype']}")
-    print(f"LoRA Rank       : {config['lora']['r']}")
-    print(f"LoRA Alpha      : {config['lora']['alpha']}")
-    print(f"LoRA Dropout    : {config['lora']['dropout']}")
-    print(f"Device          : {next(model.parameters()).device}")
     print(
-        f"Gradient Checkpointing : "
-        f"{model.is_gradient_checkpointing}"
+        f"Model : {model_name}"
     )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        pretrained_model_name_or_path=model_name,
+        quantization_config=quantization_config,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+
+    if model is None:
+        raise RuntimeError(
+            "Base model loading returned None."
+        )
+
+    print(
+        "Base model loaded successfully."
+    )
+
     print("=" * 80)
 
+    return model
 
-def _prepare_model(
-    model: Any,
-) -> Any:
+
+
+
+def _configure_base_model(
+    model: PreTrainedModel,
+) -> PreTrainedModel:
     """
-    Prepare the model for QLoRA training.
+    Configure the base model for causal-language-model
+    fine-tuning before LoRA adapters are attached.
     """
+
+    if not hasattr(
+        model,
+        "config",
+    ):
+        raise RuntimeError(
+            "Loaded model does not expose a configuration."
+        )
+
+    model.config.use_cache = False
+
+    if hasattr(
+        model.config,
+        "pretraining_tp",
+    ):
+        model.config.pretraining_tp = 1
+
+    if (
+        hasattr(
+            model.config,
+            "pad_token_id",
+        )
+        and model.config.pad_token_id is None
+    ):
+        if model.config.eos_token_id is None:
+            raise RuntimeError(
+                "Neither pad_token_id nor "
+                "eos_token_id is available."
+            )
+
+        model.config.pad_token_id = (
+            model.config.eos_token_id
+        )
+
+    return model
+
+
+
+def _prepare_for_qlora(
+    model: PreTrainedModel,
+    config: ModelConfig,
+) -> PreTrainedModel:
+    """
+    Prepare a quantized model for QLoRA training.
+    """
+
+    quantization = config[
+        "quantization"
+    ]
+
+    if not bool(
+        quantization["load_in_4bit"]
+    ):
+        return model
 
     model = prepare_model_for_kbit_training(
         model,
@@ -272,16 +378,274 @@ def _prepare_model(
 
     return model
 
-def print_model_memory(
-    model: Any,
-) -> None:
+
+
+def _enable_training_optimizations(
+    model: PreTrainedModel,
+) -> PreTrainedModel:
     """
-    Print model memory footprint.
+    Enable memory-saving training optimizations.
     """
 
-    memory = (
-        model.get_memory_footprint()
-        / 1024**3
+    model.config.use_cache = False
+
+    if not model.is_gradient_checkpointing:
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={
+                "use_reentrant": False,
+            }
+        )
+
+    model.enable_input_require_grads()
+
+    return model
+
+def _attach_lora_adapter(
+    model: PreTrainedModel,
+    lora_config: LoraConfig,
+) -> PreTrainedModel:
+    """
+    Attach the trainable LoRA adapters to the
+    prepared base model.
+    """
+
+    model = get_peft_model(
+        model,
+        lora_config,
+    )
+
+    if not isinstance(
+        model,
+        PeftModel,
+    ):
+        raise RuntimeError(
+            "LoRA adapter attachment failed. "
+            "Expected a PeftModel."
+        )
+
+    return model
+
+
+
+
+def _freeze_base_parameters(
+    model: PreTrainedModel,
+) -> None:
+    """
+    Ensure base-model parameters are frozen.
+
+    Only LoRA adapter parameters should remain
+    trainable for this QLoRA configuration.
+    """
+
+    for name, parameter in model.named_parameters():
+
+        if "lora_" in name.lower():
+            continue
+
+        parameter.requires_grad = False
+
+
+def _get_parameter_statistics(
+    model: PreTrainedModel,
+) -> tuple[int, int, float]:
+    """
+    Calculate trainable and total parameter counts.
+    """
+
+    trainable_parameters = 0
+    total_parameters = 0
+
+    for parameter in model.parameters():
+
+        parameter_count = parameter.numel()
+
+        total_parameters += parameter_count
+
+        if parameter.requires_grad:
+            trainable_parameters += parameter_count
+
+    if total_parameters == 0:
+        raise RuntimeError(
+            "Model contains zero parameters."
+        )
+
+    percentage = (
+        trainable_parameters
+        / total_parameters
+        * 100.0
+    )
+
+    return (
+        trainable_parameters,
+        total_parameters,
+        percentage,
+    )
+
+
+
+def _validate_trainable_parameters(
+    model: PreTrainedModel,
+) -> None:
+    """
+    Verify that LoRA parameters are trainable
+    and the base model remains frozen.
+    """
+
+    trainable_parameters = [
+        name
+        for name, parameter
+        in model.named_parameters()
+        if parameter.requires_grad
+    ]
+
+    if not trainable_parameters:
+        raise RuntimeError(
+            "No trainable parameters were found."
+        )
+
+    non_lora_trainable = [
+        name
+        for name in trainable_parameters
+        if "lora_" not in name.lower()
+    ]
+
+    if non_lora_trainable:
+        raise RuntimeError(
+            "Non-LoRA parameters are trainable: "
+            f"{non_lora_trainable[:10]}"
+        )
+
+    print("=" * 80)
+    print("TRAINABLE PARAMETER VALIDATION")
+    print("=" * 80)
+    print(
+        f"Trainable Parameters : "
+        f"{len(trainable_parameters):,}"
+    )
+    print(
+        "Status                : "
+        "LoRA parameters only"
+    )
+    print("=" * 80)
+
+
+def _print_model_summary(
+    model: PreTrainedModel,
+    config: ModelConfig,
+) -> None:
+    """
+    Display the final model configuration.
+    """
+
+    trainable, total, percentage = (
+        _get_parameter_statistics(
+            model
+        )
+    )
+
+    quantization = config[
+        "quantization"
+    ]
+
+    lora = config[
+        "lora"
+    ]
+
+    print("=" * 80)
+    print("FINAL MODEL SUMMARY")
+    print("=" * 80)
+
+    print(
+        f"Base Model          : "
+        f"{config['model']['name']}"
+    )
+
+    print(
+        f"Quantization        : "
+        f"{quantization['bnb_4bit_quant_type']}"
+    )
+
+    print(
+        f"4-bit Loading       : "
+        f"{quantization['load_in_4bit']}"
+    )
+
+    print(
+        f"Compute Dtype       : "
+        f"{quantization['bnb_4bit_compute_dtype']}"
+    )
+
+    print(
+        f"LoRA Rank           : "
+        f"{lora['r']}"
+    )
+
+    print(
+        f"LoRA Alpha          : "
+        f"{lora['alpha']}"
+    )
+
+    print(
+        f"LoRA Dropout        : "
+        f"{lora['dropout']}"
+    )
+
+    print(
+        f"Trainable Params    : "
+        f"{trainable:,}"
+    )
+
+    print(
+        f"Total Params        : "
+        f"{total:,}"
+    )
+
+    print(
+        f"Trainable Ratio     : "
+        f"{percentage:.4f}%"
+    )
+
+    print(
+        f"Gradient Checkpoint : "
+        f"{model.is_gradient_checkpointing}"
+    )
+
+    print(
+        f"Use Cache           : "
+        f"{model.config.use_cache}"
+    )
+
+    print("=" * 80)
+
+
+
+def _print_model_memory(
+    model: PreTrainedModel,
+) -> None:
+    """
+    Display the model memory footprint when
+    the loaded model provides the required API.
+    """
+
+    if not hasattr(
+        model,
+        "get_memory_footprint",
+    ):
+        print(
+            "Model memory footprint is unavailable."
+        )
+        return
+
+    memory_bytes = model.get_memory_footprint()
+
+    if memory_bytes <= 0:
+        raise RuntimeError(
+            "Model reported an invalid memory footprint."
+        )
+
+    memory_gb = (
+        memory_bytes / (1024 ** 3)
     )
 
     print("=" * 80)
@@ -289,100 +653,162 @@ def print_model_memory(
     print("=" * 80)
     print(
         f"Memory Footprint : "
-        f"{memory:.2f} GB"
+        f"{memory_gb:.2f} GB"
     )
     print("=" * 80)
 
 
-def freeze_base_model(
-    model: Any,
+
+
+def _print_model_memory(
+    model: PreTrainedModel,
 ) -> None:
     """
-    Ensure only LoRA parameters remain trainable.
-    """
-
-    for name, parameter in model.named_parameters():
-
-        if "lora" not in name.lower():
-
-            parameter.requires_grad = False
-
-def configure_model(
-    model: Any,
-) -> Any:
-    """
-    Configure the model before training.
-    """
-
-    # Disable cache during training.
-    model.config.use_cache = False
-
-    # Set padding token if available.
-    if hasattr(model.config, "pad_token_id"):
-        model.config.pad_token_id = model.config.eos_token_id
-
-    # Ensure tensor parallelism does not interfere.
-    if hasattr(model.config, "pretraining_tp"):
-        model.config.pretraining_tp = 1
-
-    return model
-
-
-
-
-
-
-
-def sanity_check_model(
-    model: Any,
-) -> None:
-    """
-    Verify the model before training.
+    Display the model memory footprint when
+    the loaded model provides the required API.
     """
 
     if not hasattr(
         model,
-        "peft_config",
+        "get_memory_footprint",
     ):
+        print(
+            "Model memory footprint is unavailable."
+        )
+        return
 
+    memory_bytes = model.get_memory_footprint()
+
+    if memory_bytes <= 0:
         raise RuntimeError(
-            "LoRA adapters missing."
+            "Model reported an invalid memory footprint."
         )
 
-    trainable_parameters = sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
+    memory_gb = (
+        memory_bytes / (1024 ** 3)
     )
 
-    if trainable_parameters == 0:
-
-        raise RuntimeError(
-            "No trainable parameters."
-        )
-
-    if model.config.use_cache:
-
-        raise RuntimeError(
-            "use_cache must be False."
-        )
-
-    if not model.training:
-
-        raise RuntimeError(
-            "Model is not in training mode."
-        )
-
     print("=" * 80)
-    print("MODEL SANITY CHECK PASSED")
+    print("MODEL MEMORY")
+    print("=" * 80)
+    print(
+        f"Memory Footprint : "
+        f"{memory_gb:.2f} GB"
+    )
     print("=" * 80)
 
 
+def get_model() -> PreTrainedModel:
+    """
+    Build and validate the complete QLoRA model.
+
+    Returns:
+        A PEFT-enabled causal language model
+        ready for the training pipeline.
+    """
+
+    config = _load_model_config()
+
+    _validate_runtime(
+        config,
+    )
+
+    quantization_config = (
+        _build_quantization_config(
+            config,
+        )
+    )
+
+    lora_config = (
+        _build_lora_config(
+            config,
+        )
+    )
+
+    model = _load_base_model(
+        config,
+        quantization_config,
+    )
+
+    model = _configure_base_model(
+        model,
+    )
+
+    model = _prepare_for_qlora(
+        model,
+        config,
+    )
+
+    model = _enable_training_optimizations(
+        model,
+    )
+
+    model = _attach_lora_adapter(
+        model,
+        lora_config,
+    )
+
+    _freeze_base_parameters(
+        model,
+    )
+
+    _validate_trainable_parameters(
+        model,
+    )
+
+    _sanity_check_model(
+        model,
+    )
+
+    _print_model_summary(
+        model,
+        config,
+    )
+
+    _print_model_memory(
+        model,
+    )
+
+    return model
 
 
+def main() -> None:
+    """
+    Build the QLoRA model and run all model-level
+    validation checks.
+    """
 
+    model = get_model()
+
+    print("=" * 80)
+    print("MODEL BUILD COMPLETE")
+    print("=" * 80)
+
+    print(
+        f"Model Type : "
+        f"{model.__class__.__name__}"
+    )
+
+    print(
+        f"Training Mode : "
+        f"{model.training}"
+    )
+
+    print(
+        f"Gradient Checkpointing : "
+        f"{model.is_gradient_checkpointing}"
+    )
+
+    print(
+        f"Use Cache : "
+        f"{model.config.use_cache}"
+    )
+
+    print("=" * 80)
 
 
 if __name__ == "__main__":
+    main()
 
-    model = get_model()
+
+    

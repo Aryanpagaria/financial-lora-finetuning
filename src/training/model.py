@@ -488,47 +488,98 @@ def _validate_trainable_parameters(
     model: PreTrainedModel,
 ) -> None:
     """
-    Verify that LoRA parameters are trainable
-    and the base model remains frozen.
+    Verify that only LoRA parameters are trainable
+    and report the actual number of trainable scalar
+    parameters.
     """
 
-    trainable_parameters = [
-        name
-        for name, parameter
-        in model.named_parameters()
-        if parameter.requires_grad
-    ]
+    trainable_parameter_names: list[str] = []
 
-    if not trainable_parameters:
+    trainable_parameter_count = 0
+
+    total_parameter_count = 0
+
+    for name, parameter in model.named_parameters():
+
+        parameter_count = parameter.numel()
+
+        total_parameter_count += parameter_count
+
+        if parameter.requires_grad:
+
+            trainable_parameter_names.append(
+                name
+            )
+
+            trainable_parameter_count += (
+                parameter_count
+            )
+
+    if total_parameter_count == 0:
+
+        raise RuntimeError(
+            "Model contains zero parameters."
+        )
+
+    if trainable_parameter_count == 0:
+
         raise RuntimeError(
             "No trainable parameters were found."
         )
 
     non_lora_trainable = [
+
         name
-        for name in trainable_parameters
+
+        for name in trainable_parameter_names
+
         if "lora_" not in name.lower()
+
     ]
 
     if non_lora_trainable:
+
         raise RuntimeError(
             "Non-LoRA parameters are trainable: "
             f"{non_lora_trainable[:10]}"
         )
 
+    trainable_percentage = (
+        trainable_parameter_count
+        / total_parameter_count
+        * 100.0
+    )
+
     print("=" * 80)
     print("TRAINABLE PARAMETER VALIDATION")
     print("=" * 80)
+
     print(
         f"Trainable Parameters : "
-        f"{len(trainable_parameters):,}"
+        f"{trainable_parameter_count:,}"
     )
+
     print(
-        "Status                : "
+        f"Total Parameters     : "
+        f"{total_parameter_count:,}"
+    )
+
+    print(
+        f"Trainable Percentage : "
+        f"{trainable_percentage:.4f}%"
+    )
+
+    print(
+        f"Trainable Tensors    : "
+        f"{len(trainable_parameter_names):,}"
+    )
+
+    print(
+        "Status               : "
         "LoRA parameters only"
     )
-    print("=" * 80)
 
+    print("=" * 80)
 
 def _print_model_summary(
     model: PreTrainedModel,
@@ -618,6 +669,7 @@ def _print_model_summary(
 
     print("=" * 80)
 
+]
 
 
 def _print_model_memory(
@@ -658,45 +710,136 @@ def _print_model_memory(
     print("=" * 80)
 
 
-
-
-def _print_model_memory(
+def _sanity_check_model(
     model: PreTrainedModel,
 ) -> None:
     """
-    Display the model memory footprint when
-    the loaded model provides the required API.
+    Perform final validation of the QLoRA model
+    before returning it to the training pipeline.
     """
+
+    if not isinstance(
+        model,
+        PeftModel,
+    ):
+        raise RuntimeError(
+            "Final model is not a PEFT model."
+        )
 
     if not hasattr(
         model,
-        "get_memory_footprint",
+        "peft_config",
     ):
-        print(
-            "Model memory footprint is unavailable."
-        )
-        return
-
-    memory_bytes = model.get_memory_footprint()
-
-    if memory_bytes <= 0:
         raise RuntimeError(
-            "Model reported an invalid memory footprint."
+            "Final model does not contain "
+            "a PEFT configuration."
         )
 
-    memory_gb = (
-        memory_bytes / (1024 ** 3)
-    )
+    if not model.is_gradient_checkpointing:
+
+        raise RuntimeError(
+            "Gradient checkpointing is not enabled."
+        )
+
+    if model.config.use_cache:
+
+        raise RuntimeError(
+            "use_cache must be False during training."
+        )
+
+    trainable_parameter_count = 0
+
+    non_lora_trainable: list[str] = []
+
+    for name, parameter in (
+        model.named_parameters()
+    ):
+
+        if not parameter.requires_grad:
+            continue
+
+        trainable_parameter_count += (
+            parameter.numel()
+        )
+
+        if "lora_" not in name.lower():
+
+            non_lora_trainable.append(
+                name
+            )
+
+    if trainable_parameter_count == 0:
+
+        raise RuntimeError(
+            "Final model contains no trainable "
+            "parameters."
+        )
+
+    if non_lora_trainable:
+
+        raise RuntimeError(
+            "Final model contains trainable "
+            "non-LoRA parameters: "
+            f"{non_lora_trainable[:10]}"
+        )
+
+    if (
+        model.config.pad_token_id is None
+        and model.config.eos_token_id is None
+    ):
+
+        raise RuntimeError(
+            "Model has neither pad_token_id "
+            "nor eos_token_id."
+        )
+
+    if not model.training:
+
+        model.train()
 
     print("=" * 80)
-    print("MODEL MEMORY")
+    print("MODEL SANITY CHECK")
     print("=" * 80)
+
     print(
-        f"Memory Footprint : "
-        f"{memory_gb:.2f} GB"
+        "PEFT Model          : PASSED"
     )
-    print("=" * 80)
 
+    print(
+        "LoRA Parameters     : PASSED"
+    )
+
+    print(
+        "Base Model Frozen   : PASSED"
+    )
+
+    print(
+        "Gradient Checkpoint : PASSED"
+    )
+
+    print(
+        "use_cache=False     : PASSED"
+    )
+
+    print(
+        "Token Configuration : PASSED"
+    )
+
+    print(
+        "Training Mode       : PASSED"
+    )
+
+    print(
+        f"Trainable Parameters: "
+        f"{trainable_parameter_count:,}"
+    )
+
+    print(
+        "Status              : "
+        "READY FOR TRAINING"
+    )
+
+    print("=" * 80)
 
 def get_model() -> PreTrainedModel:
     """
@@ -811,4 +954,3 @@ if __name__ == "__main__":
     main()
 
 
-    

@@ -1,0 +1,40 @@
+evaluation:
+  enabled: true
+
+  batch_size: 1
+
+  max_new_tokens: 256
+
+  temperature: 0.0
+
+  do_sample: false
+
+  top_p: 1.0
+
+  metrics:
+    exact_match: true
+    normalized_exact_match: true
+    numerical_accuracy: true
+
+  splits:
+    validation: true
+    test: true
+
+  generation:
+    repetition_penalty: 1.0
+
+    no_repeat_ngram_size: 0
+
+    early_stopping: true
+
+  output:
+    directory: artifacts/evaluation
+
+    save_predictions: true
+
+    save_metrics: true
+
+    save_failed_examples: true
+
+  reproducibility:
+    seed: 42

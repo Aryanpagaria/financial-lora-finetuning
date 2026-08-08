@@ -1,6 +1,36 @@
 logging:
   level: INFO
 
-  log_directory: artifacts/logs
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 
-  file_name: training.log
+  console:
+    enabled: true
+
+  file:
+    enabled: true
+
+    directory: artifacts/logs
+
+    filename: training.log
+
+    rotation:
+      enabled: true
+
+      max_bytes: 10485760
+
+      backup_count: 5
+
+  training:
+    log_loss: true
+
+    log_learning_rate: true
+
+    log_epoch: true
+
+    log_global_step: true
+
+    log_gradient_norm: true
+
+    log_gpu_memory: true
+
+    log_validation_metrics: true

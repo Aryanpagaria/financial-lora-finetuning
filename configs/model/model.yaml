@@ -1,26 +1,52 @@
 model:
-  name: "Qwen/Qwen2.5-3B-Instruct"
+  name: Qwen/Qwen2.5-3B-Instruct
 
-quantization:
-  load_in_4bit: true
-  bnb_4bit_quant_type: "nf4"
-  bnb_4bit_compute_dtype: "float16"
-  bnb_4bit_use_double_quant: true
+  trust_remote_code: true
 
-tokenizer:
-  padding_side: "right"
+  quantization:
+    enabled: true
+    load_in_4bit: true
+    quantization_type: nf4
+    use_double_quantization: true
+    compute_dtype: float16
 
-peft:
-  method: "lora"
+  device:
+    device_map: auto
+
+  gradient_checkpointing:
+    enabled: true
+
+  use_cache: false
 
 lora:
-  r: 16
+  enabled: true
+
+  rank: 16
+
   alpha: 32
+
   dropout: 0.05
-  bias: "none"
+
+  bias: none
+
+  task_type: CAUSAL_LM
 
   target_modules:
     - q_proj
     - k_proj
     - v_proj
     - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+  modules_to_save: []
+
+training:
+  prepare_model_for_kbit_training: true
+
+validation:
+  require_cuda_for_4bit: true
+  require_peft_model: true
+  require_frozen_base_model: true
+  require_trainable_lora_parameters: true

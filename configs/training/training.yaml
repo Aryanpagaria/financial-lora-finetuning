@@ -1,41 +1,49 @@
 training:
-  batch_size: 1
   epochs: 10
-  max_epochs_per_session: 2
+
+  batch_size: 1
+
+  gradient_accumulation_steps: 8
 
   learning_rate: 0.0002
+
   weight_decay: 0.01
 
-  max_seq_length: 512
-  gradient_checkpointing: true
-  random_seed: 42
+  max_grad_norm: 1.0
 
-  gradient_accumulation_steps: 4
   warmup_ratio: 0.03
 
-  fp16: true
-  bf16: false
+  max_seq_length: 512
 
+  optimizer: adamw
 
+  scheduler: linear
 
-optimizer:
-  name: "adamw"
+  precision:
+    fp16: true
+    bf16: false
 
-scheduler:
-  name: "linear"
+  dataloader:
+    shuffle_train: true
+    shuffle_validation: false
+    shuffle_test: false
 
-early_stopping:
-  enabled: true
-  patience: 3
-  min_delta: 0.001
+    num_workers: 2
 
-wandb:
-  enabled: true
-  project: "financial-lora-finetuning"
-  run_name: "qwen-lora-finqa"
+    pin_memory: true
 
-  tags:
-    - "LoRA"
-    - "FinQA"
+    persistent_workers: true
 
-  notes: "Initial training run"
+  validation:
+    enabled: true
+
+    frequency: epoch
+
+  gradient_checkpointing:
+    enabled: true
+
+  reproducibility:
+    seed: 42
+
+  logging:
+    log_every_n_steps: 10

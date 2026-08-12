@@ -823,14 +823,66 @@ def _validate_trainable_parameters(
     )
 
     print("=" * 80)
-
 def _print_model_summary(
     model: PreTrainedModel,
     config: ModelConfig,
 ) -> None:
     """
-    Display the final model configuration.
+    Display the final QLoRA model configuration and parameter
+    statistics using the canonical project configuration schema.
     """
+
+    if not isinstance(
+        model,
+        PreTrainedModel,
+    ):
+        raise TypeError(
+            "model must be a transformers PreTrainedModel."
+        )
+
+    if not isinstance(
+        config,
+        dict,
+    ):
+        raise TypeError(
+            "config must be a dictionary."
+        )
+
+    model_config = config.get(
+        "model"
+    )
+
+    if not isinstance(
+        model_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'model' configuration."
+        )
+
+    quantization = model_config.get(
+        "quantization"
+    )
+
+    if not isinstance(
+        quantization,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'model.quantization' configuration."
+        )
+
+    lora = config.get(
+        "lora"
+    )
+
+    if not isinstance(
+        lora,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'lora' configuration."
+        )
 
     trainable, total, percentage = (
         _get_parameter_statistics(
@@ -838,24 +890,18 @@ def _print_model_summary(
         )
     )
 
-    quantization = config["model"]["quantization"]
-
-    lora = config[
-        "lora"
-    ]
-
     print("=" * 80)
     print("FINAL MODEL SUMMARY")
     print("=" * 80)
 
     print(
         f"Base Model          : "
-        f"{config['model']['name']}"
+        f"{model_config['name']}"
     )
 
     print(
         f"Quantization        : "
-        f"{quantization['bnb_4bit_quant_type']}"
+        f"{quantization['quantization_type']}"
     )
 
     print(
@@ -865,12 +911,17 @@ def _print_model_summary(
 
     print(
         f"Compute Dtype       : "
-        f"{quantization['bnb_4bit_compute_dtype']}"
+        f"{quantization['compute_dtype']}"
+    )
+
+    print(
+        f"Double Quantization : "
+        f"{quantization['use_double_quantization']}"
     )
 
     print(
         f"LoRA Rank           : "
-        f"{lora['r']}"
+        f"{lora['rank']}"
     )
 
     print(
@@ -909,7 +960,6 @@ def _print_model_summary(
     )
 
     print("=" * 80)
-
 
 
 def _print_model_memory(

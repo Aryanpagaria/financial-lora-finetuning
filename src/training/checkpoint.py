@@ -10,7 +10,9 @@ from typing import Any
 
 import numpy as np
 import torch
-
+import os
+import tempfile
+from datetime import datetime, timezone
 from peft import (
     get_peft_model_state_dict,
     set_peft_model_state_dict,
@@ -1620,76 +1622,6 @@ def find_resume_checkpoint() -> Path | None:
 
 
 
-def save_checkpoint(
-    model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
-    epoch: int,
-    global_step: int,
-    best_metric: float | None,
-    training_config: dict[str, Any],
-) -> Path:
-    """
-    Save a complete training checkpoint and update the
-    latest checkpoint reference.
-
-    Returns:
-        Path to the saved epoch checkpoint.
-    """
-
-    checkpoint_config = _get_checkpoint_config()
-
-    directories = (
-        _create_checkpoint_directories(
-            checkpoint_config
-        )
-    )
-
-    checkpoint_directory = directories[
-        "root"
-    ]
-
-    checkpoint_path = (
-        checkpoint_directory
-        / f"epoch_{epoch}.pt"
-    )
-
-    saved_path = _save_training_checkpoint(
-        model=model,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        epoch=epoch,
-        global_step=global_step,
-        best_metric=best_metric,
-        training_config=training_config,
-        checkpoint_path=checkpoint_path,
-    )
-
-    _update_latest_checkpoint(
-        checkpoint_path=saved_path,
-        latest_directory=directories[
-            "latest"
-        ],
-    )
-
-    retention_config = checkpoint_config[
-        "retention"
-    ]
-
-    if retention_config["enabled"]:
-
-        _cleanup_old_checkpoints(
-            checkpoint_directory=(
-                checkpoint_directory
-            ),
-            max_checkpoints=int(
-                retention_config[
-                    "max_checkpoints"
-                ]
-            ),
-        )
-
-    return saved_path
 
 
 def resume_from_checkpoint(
@@ -2444,18 +2376,7 @@ def main() -> None:
             current_training_config=compatible_training_config,
         )
 
-        # ------------------------------------------------------------------
-        # Restore complete training state
-        # ------------------------------------------------------------------
-
-        restored_metadata = resume_from_checkpoint(
-            checkpoint_path=checkpoint_path,
-            model=restored_model,
-            optimizer=restored_optimizer,
-            scheduler=restored_scheduler,
-            current_training_config=compatible_training_config,
-        )
-
+        
         # ------------------------------------------------------------------
         # Verify training metadata
         # ------------------------------------------------------------------
@@ -2736,7 +2657,7 @@ def main() -> None:
 
         _cleanup_old_checkpoints(
             checkpoint_directory=retention_directory,
-            max_checkpoints=3,
+            max_checkpoints=2,
         )
 
         remaining_checkpoints = (
@@ -2745,10 +2666,10 @@ def main() -> None:
             )
         )
 
-        if len(remaining_checkpoints) != 3:
+        if len(remaining_checkpoints) != 2:
             raise RuntimeError(
                 "Retention policy failed. "
-                "Expected 3 checkpoints, "
+                "Expected 2 checkpoints, "
                 f"found {len(remaining_checkpoints)}."
             )
 
@@ -2758,7 +2679,6 @@ def main() -> None:
         }
 
         expected_names = {
-            "epoch_3.pt",
             "epoch_4.pt",
             "epoch_5.pt",
         }
@@ -2873,5 +2793,916 @@ def main() -> None:
         )
 
 
+def _get_drive_config(
+    checkpoint_config: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Load and validate the optional Google Drive persistence
+    configuration.
+
+    Training remains functional when Google Drive is not mounted.
+    In that case synchronization is skipped with an explicit
+    message.
+    """
+
+    drive_config = checkpoint_config.get(
+        "drive",
+        {},
+    )
+
+    if not isinstance(
+        drive_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "checkpoint.drive must be a dictionary."
+        )
+
+    required_keys = {
+        "enabled",
+        "root_directory",
+        "sync_epoch_checkpoints",
+        "sync_latest_checkpoint",
+        "sync_best_checkpoint",
+        "sync_lora_adapter",
+        "sync_tokenizer",
+        "sync_logs",
+        "verify_after_copy",
+    }
+
+    missing_keys = sorted(
+        required_keys
+        - set(drive_config.keys())
+    )
+
+    if missing_keys:
+        raise RuntimeError(
+            "Missing checkpoint.drive configuration keys: "
+            f"{missing_keys}"
+        )
+
+    if not isinstance(
+        drive_config["enabled"],
+        bool,
+    ):
+        raise TypeError(
+            "checkpoint.drive.enabled must be boolean."
+        )
+
+    if not isinstance(
+        drive_config["root_directory"],
+        str,
+    ) or not drive_config[
+        "root_directory"
+    ].strip():
+        raise ValueError(
+            "checkpoint.drive.root_directory must be "
+            "a non-empty string."
+        )
+
+    boolean_keys = {
+        "sync_epoch_checkpoints",
+        "sync_latest_checkpoint",
+        "sync_best_checkpoint",
+        "sync_lora_adapter",
+        "sync_tokenizer",
+        "sync_logs",
+        "verify_after_copy",
+    }
+
+    for key in boolean_keys:
+        if not isinstance(
+            drive_config[key],
+            bool,
+        ):
+            raise TypeError(
+                f"checkpoint.drive.{key} must be boolean."
+            )
+
+    return drive_config
+
+
+def _get_drive_root(
+    checkpoint_config: dict[str, Any],
+) -> Path | None:
+    """
+    Resolve the configured Google Drive root.
+
+    Returns None when Drive synchronization is disabled or
+    Google Drive is not currently mounted.
+    """
+
+    drive_config = _get_drive_config(
+        checkpoint_config
+    )
+
+    if not drive_config["enabled"]:
+        return None
+
+    configured_root = Path(
+        drive_config["root_directory"]
+    )
+
+    if not configured_root.exists():
+        return None
+
+    if not configured_root.is_dir():
+        raise RuntimeError(
+            "Configured Google Drive root is not a directory: "
+            f"{configured_root}"
+        )
+
+    return configured_root
+
+
+def _ensure_drive_directories(
+    checkpoint_config: dict[str, Any],
+) -> Path | None:
+    """
+    Create the persistent Google Drive directory tree when Drive
+    is mounted.
+
+    Returns:
+        The Drive project root, or None when synchronization is
+        unavailable.
+    """
+
+    drive_root = _get_drive_root(
+        checkpoint_config
+    )
+
+    if drive_root is None:
+        return None
+
+    directories = [
+        drive_root / "checkpoints",
+        drive_root / "checkpoints" / "latest",
+        drive_root / "checkpoints" / "state",
+        drive_root / "best_model",
+        drive_root / "lora_adapter",
+        drive_root / "evaluation",
+        drive_root / "logs",
+        drive_root / "run_metadata",
+    ]
+
+    for directory in directories:
+        directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+    return drive_root
+
+def _atomic_copy_file(
+    source_path: Path,
+    destination_path: Path,
+    verify: bool,
+) -> Path:
+    """
+    Atomically copy a completed file to a destination.
+
+    The destination is replaced only after the copy completes.
+    Optional byte-size verification prevents a truncated copy from
+    being considered valid.
+    """
+
+    if not source_path.exists():
+        raise FileNotFoundError(
+            f"Source file does not exist: {source_path}"
+        )
+
+    if not source_path.is_file():
+        raise RuntimeError(
+            f"Source path is not a file: {source_path}"
+        )
+
+    destination_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = destination_path.with_suffix(
+        destination_path.suffix + ".tmp"
+    )
+
+    try:
+        shutil.copy2(
+            source_path,
+            temporary_path,
+        )
+
+        if verify:
+            source_size = source_path.stat().st_size
+            temporary_size = temporary_path.stat().st_size
+
+            if source_size <= 0:
+                raise RuntimeError(
+                    f"Source file is empty: {source_path}"
+                )
+
+            if source_size != temporary_size:
+                raise RuntimeError(
+                    "Drive copy size mismatch:\n"
+                    f"source={source_size}\n"
+                    f"temporary={temporary_size}\n"
+                    f"source_path={source_path}\n"
+                    f"temporary_path={temporary_path}"
+                )
+
+        temporary_path.replace(
+            destination_path
+        )
+
+        if verify:
+            destination_size = destination_path.stat().st_size
+            source_size = source_path.stat().st_size
+
+            if destination_size != source_size:
+                raise RuntimeError(
+                    "Destination verification failed:\n"
+                    f"source={source_size}\n"
+                    f"destination={destination_size}\n"
+                    f"destination_path={destination_path}"
+                )
+
+        return destination_path
+
+    except Exception:
+
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+        raise
+
+
+
+def _verify_checkpoint_integrity(
+    checkpoint_path: Path,
+) -> CheckpointState:
+    """
+    Load and validate a newly written checkpoint before it can
+    become a resume checkpoint or be copied to Drive.
+    """
+
+    if not checkpoint_path.exists():
+        raise RuntimeError(
+            "Checkpoint file does not exist after save: "
+            f"{checkpoint_path}"
+        )
+
+    file_size = checkpoint_path.stat().st_size
+
+    if file_size <= 0:
+        raise RuntimeError(
+            "Checkpoint file is empty: "
+            f"{checkpoint_path}"
+        )
+
+    checkpoint_state = _load_checkpoint_file(
+        checkpoint_path
+    )
+
+    return checkpoint_state
+
+
+def _sync_epoch_checkpoint_to_drive(
+    checkpoint_path: Path,
+    checkpoint_config: dict[str, Any],
+) -> Path | None:
+    """
+    Synchronize a validated epoch checkpoint to Google Drive.
+    """
+
+    drive_config = _get_drive_config(
+        checkpoint_config
+    )
+
+    if not drive_config["enabled"]:
+        return None
+
+    if not drive_config[
+        "sync_epoch_checkpoints"
+    ]:
+        return None
+
+    drive_root = _ensure_drive_directories(
+        checkpoint_config
+    )
+
+    if drive_root is None:
+        print(
+            "Google Drive not mounted. "
+            "Epoch checkpoint remains stored locally."
+        )
+        return None
+
+    destination = (
+        drive_root
+        / "checkpoints"
+        / checkpoint_path.name
+    )
+
+    result = _atomic_copy_file(
+        source_path=checkpoint_path,
+        destination_path=destination,
+        verify=drive_config[
+            "verify_after_copy"
+        ],
+    )
+
+    print(
+        f"Drive Epoch Checkpoint: {result}"
+    )
+
+    return result
+
+
+def _sync_latest_checkpoint_to_drive(
+    latest_checkpoint_path: Path,
+    checkpoint_config: dict[str, Any],
+) -> Path | None:
+    """
+    Synchronize the validated latest checkpoint pointer to Drive.
+    """
+
+    drive_config = _get_drive_config(
+        checkpoint_config
+    )
+
+    if not drive_config[
+        "enabled"
+    ]:
+        return None
+
+    if not drive_config[
+        "sync_latest_checkpoint"
+    ]:
+        return None
+
+    drive_root = _ensure_drive_directories(
+        checkpoint_config
+    )
+
+    if drive_root is None:
+        print(
+            "Google Drive not mounted. "
+            "Latest checkpoint remains stored locally."
+        )
+        return None
+
+    destination = (
+        drive_root
+        / "checkpoints"
+        / "latest"
+        / "latest.pt"
+    )
+
+    result = _atomic_copy_file(
+        source_path=latest_checkpoint_path,
+        destination_path=destination,
+        verify=drive_config[
+            "verify_after_copy"
+        ],
+    )
+
+    print(
+        f"Drive Latest Checkpoint: {result}"
+    )
+
+    return result
+
+
+def save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    epoch: int,
+    global_step: int,
+    best_metric: float | None,
+    training_config: dict[str, Any],
+) -> Path:
+    """
+    Save a complete validated epoch checkpoint, update the
+    local latest checkpoint, synchronize durable copies to
+    Google Drive when available, and enforce retention.
+
+    Local checkpoint persistence is authoritative. Google Drive
+    synchronization failures are reported but do not invalidate
+    a successfully created local checkpoint.
+    """
+
+    checkpoint_config = _get_checkpoint_config()
+
+    directories = _create_checkpoint_directories(
+        checkpoint_config
+    )
+
+    checkpoint_directory = directories[
+        "root"
+    ]
+
+    checkpoint_path = (
+        checkpoint_directory
+        / f"epoch_{epoch}.pt"
+    )
+
+    saved_path = _save_training_checkpoint(
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        epoch=epoch,
+        global_step=global_step,
+        best_metric=best_metric,
+        training_config=training_config,
+        checkpoint_path=checkpoint_path,
+    )
+
+    _verify_checkpoint_integrity(
+        saved_path
+    )
+
+    drive_errors: list[str] = []
+
+    try:
+        _sync_epoch_checkpoint_to_drive(
+            checkpoint_path=saved_path,
+            checkpoint_config=checkpoint_config,
+        )
+    except Exception as error:
+        drive_errors.append(
+            f"epoch checkpoint synchronization failed: {error}"
+        )
+
+    latest_path = _update_latest_checkpoint(
+        checkpoint_path=saved_path,
+        latest_directory=directories[
+            "latest"
+        ],
+    )
+
+    _verify_checkpoint_integrity(
+        latest_path
+    )
+
+    try:
+        _sync_latest_checkpoint_to_drive(
+            latest_checkpoint_path=latest_path,
+            checkpoint_config=checkpoint_config,
+        )
+    except Exception as error:
+        drive_errors.append(
+            f"latest checkpoint synchronization failed: {error}"
+        )
+
+    retention_config = checkpoint_config[
+        "retention"
+    ]
+
+    if retention_config[
+        "enabled"
+    ]:
+
+        _cleanup_old_checkpoints(
+            checkpoint_directory=checkpoint_directory,
+            max_checkpoints=int(
+                retention_config[
+                    "max_checkpoints"
+                ]
+            ),
+        )
+
+    if drive_errors:
+        print("=" * 80)
+        print("WARNING: Google Drive synchronization issues")
+        for message in drive_errors:
+            print(f"- {message}")
+        print(
+            "Local checkpoint is valid; training will continue."
+        )
+        print("=" * 80)
+
+    return saved_path
+
+
+
+def _sync_best_checkpoint_to_drive(
+    best_checkpoint_path: Path,
+    checkpoint_config: dict[str, Any],
+) -> Path | None:
+    """
+    Synchronize the newly improved best checkpoint to Drive.
+    """
+
+    drive_config = _get_drive_config(
+        checkpoint_config
+    )
+
+    if not drive_config[
+        "enabled"
+    ]:
+        return None
+
+    if not drive_config[
+        "sync_best_checkpoint"
+    ]:
+        return None
+
+    drive_root = _ensure_drive_directories(
+        checkpoint_config
+    )
+
+    if drive_root is None:
+        print(
+            "Google Drive not mounted. "
+            "Best checkpoint remains stored locally."
+        )
+        return None
+
+    destination = (
+        drive_root
+        / "best_model"
+        / "best.pt"
+    )
+
+    result = _atomic_copy_file(
+        source_path=best_checkpoint_path,
+        destination_path=destination,
+        verify=drive_config[
+            "verify_after_copy"
+        ],
+    )
+
+    print(
+        f"Drive Best Checkpoint  : {result}"
+    )
+
+    return result
+
+
+
+def _export_best_lora_adapter(
+    model: torch.nn.Module,
+    checkpoint_config: dict[str, Any],
+) -> Path:
+    """
+    Export the current LoRA adapter for inference and verify that
+    the resulting directory contains a valid PEFT adapter.
+    """
+
+    if not isinstance(
+        model,
+        torch.nn.Module,
+    ):
+        raise TypeError(
+            "model must be a torch.nn.Module."
+        )
+
+    directories = _create_checkpoint_directories(
+        checkpoint_config
+    )
+
+    adapter_directory = directories[
+        "lora_export"
+    ]
+
+    temporary_directory = (
+        adapter_directory.parent
+        / f".lora_export_{os.getpid()}"
+    )
+
+    if temporary_directory.exists():
+        shutil.rmtree(
+            temporary_directory
+        )
+
+    temporary_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    try:
+
+        save_pretrained = getattr(
+            model,
+            "save_pretrained",
+            None,
+        )
+
+        if not callable(
+            save_pretrained
+        ):
+            raise RuntimeError(
+                "Model does not support save_pretrained()."
+            )
+
+        save_pretrained(
+            temporary_directory
+        )
+
+        adapter_config_path = (
+            temporary_directory
+            / "adapter_config.json"
+        )
+
+        if not adapter_config_path.exists():
+            raise RuntimeError(
+                "LoRA export completed without "
+                "adapter_config.json."
+            )
+
+        adapter_weight_files = [
+            path
+            for path in temporary_directory.iterdir()
+            if path.is_file()
+            and path.name.startswith("adapter_model")
+            and path.suffix in {
+                ".bin",
+                ".safetensors",
+            }
+        ]
+
+        if not adapter_weight_files:
+            raise RuntimeError(
+                "LoRA export completed without an adapter "
+                "weight file."
+            )
+
+        if adapter_directory.exists():
+            shutil.rmtree(
+                adapter_directory
+            )
+
+        temporary_directory.replace(
+            adapter_directory
+        )
+
+    except Exception:
+
+        if temporary_directory.exists():
+            shutil.rmtree(
+                temporary_directory
+            )
+
+        raise
+
+    return adapter_directory
+
+
+
+def _sync_lora_adapter_to_drive(
+    adapter_directory: Path,
+    checkpoint_config: dict[str, Any],
+) -> None:
+    """
+    Synchronize the best LoRA adapter directory to Drive.
+    """
+
+    drive_config = _get_drive_config(
+        checkpoint_config
+    )
+
+    if not drive_config[
+        "enabled"
+    ]:
+        return
+
+    if not drive_config[
+        "sync_lora_adapter"
+    ]:
+        return
+
+    drive_root = _ensure_drive_directories(
+        checkpoint_config
+    )
+
+    if drive_root is None:
+        print(
+            "Google Drive not mounted. "
+            "LoRA adapter remains stored locally."
+        )
+        return
+
+    destination = (
+        drive_root
+        / "lora_adapter"
+    )
+
+    temporary_destination = (
+        drive_root
+        / ".lora_adapter_tmp"
+    )
+
+    if temporary_destination.exists():
+        shutil.rmtree(
+            temporary_destination
+        )
+
+    shutil.copytree(
+        adapter_directory,
+        temporary_destination,
+    )
+
+    if destination.exists():
+        shutil.rmtree(
+            destination
+        )
+
+    temporary_destination.replace(
+        destination
+    )
+
+    print(
+        f"Drive LoRA Adapter     : {destination}"
+    )
+
+
+
+def save_best_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    epoch: int,
+    global_step: int,
+    best_metric: float,
+    training_config: dict[str, Any],
+) -> Path:
+    """
+    Save and persist the current best QLoRA training state.
+
+    The best checkpoint is updated only when the trainer has
+    already determined that the current validation metric is
+    better than the previous best metric.
+
+    The local best checkpoint is written atomically, validated,
+    synchronized to Google Drive when available, and the current
+    LoRA adapter is exported and synchronized to Drive.
+    """
+
+    if not isinstance(
+        model,
+        torch.nn.Module,
+    ):
+        raise TypeError(
+            "model must be a torch.nn.Module."
+        )
+
+    if not isinstance(
+        optimizer,
+        torch.optim.Optimizer,
+    ):
+        raise TypeError(
+            "optimizer must be a torch optimizer."
+        )
+
+    if not isinstance(
+        scheduler,
+        torch.optim.lr_scheduler.LRScheduler,
+    ):
+        raise TypeError(
+            "scheduler must be a PyTorch learning-rate scheduler."
+        )
+
+    if not isinstance(
+        epoch,
+        int,
+    ) or epoch < 0:
+        raise ValueError(
+            "epoch must be a non-negative integer."
+        )
+
+    if not isinstance(
+        global_step,
+        int,
+    ) or global_step < 0:
+        raise ValueError(
+            "global_step must be a non-negative integer."
+        )
+
+    if not isinstance(
+        best_metric,
+        (int, float),
+    ):
+        raise TypeError(
+            "best_metric must be numeric."
+        )
+
+    if not torch.isfinite(
+        torch.tensor(
+            float(best_metric)
+        )
+    ):
+        raise FloatingPointError(
+            "best_metric must be finite."
+        )
+
+    if not isinstance(
+        training_config,
+        dict,
+    ):
+        raise TypeError(
+            "training_config must be a dictionary."
+        )
+
+    checkpoint_config = _get_checkpoint_config()
+
+    best_config = checkpoint_config[
+        "best_model"
+    ]
+
+    if not isinstance(
+        best_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "checkpoint.best_model must be a dictionary."
+        )
+
+    if not best_config.get(
+        "enabled",
+        False,
+    ):
+        raise RuntimeError(
+            "Best checkpoint saving is disabled "
+            "in checkpoint configuration."
+        )
+
+    directories = _create_checkpoint_directories(
+        checkpoint_config
+    )
+
+    temporary_checkpoint_path = (
+        directories["root"]
+        / f".best_epoch_{epoch}.pt"
+    )
+
+    try:
+        saved_checkpoint = _save_training_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            epoch=epoch,
+            global_step=global_step,
+            best_metric=float(best_metric),
+            training_config=training_config,
+            checkpoint_path=temporary_checkpoint_path,
+        )
+
+        _verify_checkpoint_integrity(
+            saved_checkpoint
+        )
+
+        best_path = _update_best_checkpoint(
+            checkpoint_path=saved_checkpoint,
+            best_directory=directories[
+                "best"
+            ],
+        )
+
+        _verify_checkpoint_integrity(
+            best_path
+        )
+
+        drive_error: Exception | None = None
+
+        try:
+            _sync_best_checkpoint_to_drive(
+                best_checkpoint_path=best_path,
+                checkpoint_config=checkpoint_config,
+            )
+        except Exception as error:
+            drive_error = error
+
+        adapter_directory = _export_best_lora_adapter(
+            model=model,
+            checkpoint_config=checkpoint_config,
+        )
+
+        try:
+            _sync_lora_adapter_to_drive(
+                adapter_directory=adapter_directory,
+                checkpoint_config=checkpoint_config,
+            )
+        except Exception as error:
+            if drive_error is None:
+                drive_error = error
+
+        if drive_error is not None:
+            print(
+                "WARNING: Google Drive synchronization of the "
+                f"best artifacts failed: {drive_error}"
+            )
+
+        print(
+            f"Best Checkpoint Saved : {best_path}"
+        )
+
+        return best_path
+
+    finally:
+        if temporary_checkpoint_path.exists():
+            temporary_checkpoint_path.unlink()
+
+
+        
 if __name__ == "__main__":
     main()

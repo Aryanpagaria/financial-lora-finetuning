@@ -323,6 +323,10 @@ def _build_lora_config(
         "modules_to_save",
     }
 
+    rank = int(lora["rank"])
+    alpha = lora["alpha"]
+    dropout = lora["dropout"]
+
     missing_keys = sorted(
         required_keys
         - set(lora_config.keys())
@@ -462,10 +466,10 @@ def _build_lora_config(
         r=rank,
         lora_alpha=alpha,
         lora_dropout=float(dropout),
-        bias=bias,
+        bias=lora["bias"],
         task_type="CAUSAL_LM",
-        target_modules=target_modules,
-        modules_to_save=modules_to_save,
+        target_modules=lora["target_modules"],
+        modules_to_save=lora["modules_to_save"],
     )
 
 def _validate_runtime(

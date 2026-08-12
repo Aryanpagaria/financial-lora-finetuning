@@ -23,22 +23,25 @@ ModelConfig = dict[str, Any]
 
 def _load_model_config() -> ModelConfig:
     """
-    Load the complete project configuration.
+    Load and validate the complete project configuration.
 
     Returns:
-        The project configuration dictionary.
+        The complete merged project configuration.
     """
 
     config = load_configs()
 
+    if not isinstance(
+        config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Loaded project configuration must be a dictionary."
+        )
+
     if "model" not in config:
         raise KeyError(
             "Missing 'model' configuration."
-        )
-
-    if "quantization" not in config:
-        raise KeyError(
-            "Missing 'quantization' configuration."
         )
 
     if "lora" not in config:
@@ -46,43 +49,182 @@ def _load_model_config() -> ModelConfig:
             "Missing 'lora' configuration."
         )
 
+    model_config = config["model"]
+
+    if not isinstance(
+        model_config,
+        dict,
+    ):
+        raise TypeError(
+            "'model' configuration must be a dictionary."
+        )
+
+    if "quantization" not in model_config:
+        raise KeyError(
+            "Missing 'model.quantization' configuration."
+        )
+
+    quantization_config = model_config[
+        "quantization"
+    ]
+
+    if not isinstance(
+        quantization_config,
+        dict,
+    ):
+        raise TypeError(
+            "'model.quantization' configuration must be a dictionary."
+        )
+
+    required_model_keys = {
+        "name",
+        "quantization",
+        "device",
+        "gradient_checkpointing",
+        "use_cache",
+    }
+
+    missing_model_keys = sorted(
+        required_model_keys
+        - set(model_config.keys())
+    )
+
+    if missing_model_keys:
+        raise KeyError(
+            "Missing model configuration keys: "
+            f"{missing_model_keys}"
+        )
+
+    required_quantization_keys = {
+        "enabled",
+        "load_in_4bit",
+        "quantization_type",
+        "use_double_quantization",
+        "compute_dtype",
+    }
+
+    missing_quantization_keys = sorted(
+        required_quantization_keys
+        - set(quantization_config.keys())
+    )
+
+    if missing_quantization_keys:
+        raise KeyError(
+            "Missing model.quantization configuration keys: "
+            f"{missing_quantization_keys}"
+        )
+
+    lora_config = config["lora"]
+
+    if not isinstance(
+        lora_config,
+        dict,
+    ):
+        raise TypeError(
+            "'lora' configuration must be a dictionary."
+        )
+
     return config
-
-
 
 
 def _build_quantization_config(
     config: ModelConfig,
-) -> BitsAndBytesConfig:
+) -> BitsAndBytesConfig | None:
     """
-    Build the BitsAndBytes configuration used
-    for QLoRA 4-bit quantization.
+    Build the BitsAndBytes configuration from the canonical
+    model.quantization YAML schema.
     """
 
-    quantization = config[
-        "quantization"
-    ]
+    if not isinstance(
+        config,
+        dict,
+    ):
+        raise TypeError(
+            "config must be a dictionary."
+        )
 
-    required_keys = {
-        "load_in_4bit",
-        "bnb_4bit_quant_type",
-        "bnb_4bit_compute_dtype",
-        "bnb_4bit_use_double_quant",
-    }
-
-    missing_keys = (
-        required_keys
-        - quantization.keys()
+    model_config = config.get(
+        "model"
     )
 
-    if missing_keys:
-        raise KeyError(
-            "Missing quantization configuration "
-            f"keys: {sorted(missing_keys)}"
+    if not isinstance(
+        model_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'model' configuration."
+        )
+
+    quantization = model_config.get(
+        "quantization"
+    )
+
+    if not isinstance(
+        quantization,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'model.quantization' configuration."
+        )
+
+    enabled = quantization[
+        "enabled"
+    ]
+
+    if not isinstance(
+        enabled,
+        bool,
+    ):
+        raise TypeError(
+            "model.quantization.enabled must be boolean."
+        )
+
+    if not enabled:
+        return None
+
+    load_in_4bit = quantization[
+        "load_in_4bit"
+    ]
+
+    if not isinstance(
+        load_in_4bit,
+        bool,
+    ):
+        raise TypeError(
+            "model.quantization.load_in_4bit must be boolean."
+        )
+
+    if not load_in_4bit:
+        return None
+
+    quantization_type = quantization[
+        "quantization_type"
+    ]
+
+    if quantization_type not in {
+        "nf4",
+        "fp4",
+    }:
+        raise ValueError(
+            "model.quantization.quantization_type must be "
+            "'nf4' or 'fp4'."
+        )
+
+    use_double_quantization = quantization[
+        "use_double_quantization"
+    ]
+
+    if not isinstance(
+        use_double_quantization,
+        bool,
+    ):
+        raise TypeError(
+            "model.quantization.use_double_quantization "
+            "must be boolean."
         )
 
     compute_dtype_name = quantization[
-        "bnb_4bit_compute_dtype"
+        "compute_dtype"
     ]
 
     if not isinstance(
@@ -90,44 +232,38 @@ def _build_quantization_config(
         str,
     ):
         raise TypeError(
-            "bnb_4bit_compute_dtype must be "
-            "a string."
+            "model.quantization.compute_dtype must be a string."
         )
 
-    if not hasattr(
-        torch,
-        compute_dtype_name,
-    ):
+    supported_dtypes = {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }
+
+    if compute_dtype_name not in supported_dtypes:
         raise ValueError(
-            "Unsupported torch compute dtype: "
-            f"{compute_dtype_name}"
+            "Unsupported model.quantization.compute_dtype: "
+            f"{compute_dtype_name}. Supported values: "
+            f"{sorted(supported_dtypes)}"
         )
 
-    compute_dtype = getattr(
-        torch,
-        compute_dtype_name,
-    )
+    compute_dtype = supported_dtypes[
+        compute_dtype_name
+    ]
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "4-bit quantization requires CUDA, "
+            "but CUDA is not available."
+        )
 
     return BitsAndBytesConfig(
-        load_in_4bit=bool(
-            quantization[
-                "load_in_4bit"
-            ]
-        ),
-        bnb_4bit_quant_type=str(
-            quantization[
-                "bnb_4bit_quant_type"
-            ]
-        ),
+        load_in_4bit=True,
+        bnb_4bit_quant_type=quantization_type,
+        bnb_4bit_use_double_quant=use_double_quantization,
         bnb_4bit_compute_dtype=compute_dtype,
-        bnb_4bit_use_double_quant=bool(
-            quantization[
-                "bnb_4bit_use_double_quant"
-            ]
-        ),
     )
-
-
 
 def _build_lora_config(
     config: ModelConfig,

@@ -1010,10 +1010,11 @@ def _sanity_check_model(
 
     if not isinstance(
         model,
-        PeftModel,
+        (PreTrainedModel, PeftModel),
     ):
-        raise RuntimeError(
-            "Final model is not a PEFT model."
+        raise TypeError(
+            "model must be a Transformers PreTrainedModel "
+            "or a PEFT PeftModel."
         )
 
     if not hasattr(

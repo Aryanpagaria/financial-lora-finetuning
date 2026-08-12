@@ -265,62 +265,149 @@ def _build_quantization_config(
         bnb_4bit_compute_dtype=compute_dtype,
     )
 
+
 def _build_lora_config(
     config: ModelConfig,
 ) -> LoraConfig:
     """
-    Build the LoRA configuration used
-    for parameter-efficient fine-tuning.
+    Build the PEFT LoRA configuration from the project's
+    canonical nested YAML schema.
+
+    Project configuration uses:
+        lora.rank
+        lora.alpha
+        lora.dropout
+        lora.bias
+        lora.task_type
+        lora.target_modules
+        lora.modules_to_save
+
+    PEFT receives:
+        r
+        lora_alpha
+        lora_dropout
+        bias
+        task_type
+        target_modules
+        modules_to_save
     """
 
-    lora = config["lora"]
+    if not isinstance(
+        config,
+        dict,
+    ):
+        raise TypeError(
+            "config must be a dictionary."
+        )
+
+    lora_config = config.get(
+        "lora"
+    )
+
+    if not isinstance(
+        lora_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Missing or invalid 'lora' configuration."
+        )
 
     required_keys = {
-        "r",
+        "enabled",
+        "rank",
         "alpha",
         "dropout",
         "bias",
+        "task_type",
         "target_modules",
+        "modules_to_save",
     }
 
-    missing_keys = (
+    missing_keys = sorted(
         required_keys
-        - lora.keys()
+        - set(lora_config.keys())
     )
 
     if missing_keys:
         raise KeyError(
-            "Missing LoRA configuration "
-            f"keys: {sorted(missing_keys)}"
+            "Missing LoRA configuration keys: "
+            f"{missing_keys}"
         )
 
-    rank = int(lora["r"])
+    if not isinstance(
+        lora_config["enabled"],
+        bool,
+    ):
+        raise TypeError(
+            "lora.enabled must be boolean."
+        )
 
-    if rank <= 0:
+    if not lora_config["enabled"]:
+        raise RuntimeError(
+            "LoRA is disabled in the project configuration."
+        )
+
+    rank = lora_config[
+        "rank"
+    ]
+
+    if not isinstance(
+        rank,
+        int,
+    ) or rank <= 0:
         raise ValueError(
-            "LoRA rank must be greater than zero."
+            "lora.rank must be a positive integer."
         )
 
-    alpha = float(
-        lora["alpha"]
-    )
+    alpha = lora_config[
+        "alpha"
+    ]
 
-    if alpha <= 0:
+    if not isinstance(
+        alpha,
+        int,
+    ) or alpha <= 0:
         raise ValueError(
-            "LoRA alpha must be greater than zero."
+            "lora.alpha must be a positive integer."
         )
 
-    dropout = float(
-        lora["dropout"]
-    )
+    dropout = lora_config[
+        "dropout"
+    ]
 
-    if not 0.0 <= dropout < 1.0:
+    if not isinstance(
+        dropout,
+        (int, float),
+    ) or not 0 <= dropout < 1:
         raise ValueError(
-            "LoRA dropout must be in "
-            "the range [0, 1)."
+            "lora.dropout must be in the range [0, 1)."
         )
 
-    target_modules = lora[
+    bias = lora_config[
+        "bias"
+    ]
+
+    if bias not in {
+        "none",
+        "all",
+        "lora_only",
+    }:
+        raise ValueError(
+            "lora.bias must be one of: "
+            "'none', 'all', 'lora_only'."
+        )
+
+    task_type = lora_config[
+        "task_type"
+    ]
+
+    if task_type != "CAUSAL_LM":
+        raise ValueError(
+            "This training pipeline requires "
+            "lora.task_type='CAUSAL_LM'."
+        )
+
+    target_modules = lora_config[
         "target_modules"
     ]
 
@@ -329,21 +416,57 @@ def _build_lora_config(
         list,
     ) or not target_modules:
         raise ValueError(
-            "LoRA target_modules must be "
-            "a non-empty list."
+            "lora.target_modules must be a non-empty list."
+        )
+
+    if not all(
+        isinstance(
+            module_name,
+            str,
+        ) and module_name.strip()
+        for module_name in target_modules
+    ):
+        raise ValueError(
+            "Every lora.target_modules entry must be a "
+            "non-empty string."
+        )
+
+    modules_to_save = lora_config[
+        "modules_to_save"
+    ]
+
+    if modules_to_save is None:
+        modules_to_save = []
+
+    if not isinstance(
+        modules_to_save,
+        list,
+    ):
+        raise TypeError(
+            "lora.modules_to_save must be a list."
+        )
+
+    if not all(
+        isinstance(
+            module_name,
+            str,
+        ) and module_name.strip()
+        for module_name in modules_to_save
+    ):
+        raise ValueError(
+            "Every lora.modules_to_save entry must be a "
+            "non-empty string."
         )
 
     return LoraConfig(
         r=rank,
         lora_alpha=alpha,
-        lora_dropout=dropout,
-        bias=str(
-            lora["bias"]
-        ),
+        lora_dropout=float(dropout),
+        bias=bias,
         task_type="CAUSAL_LM",
         target_modules=target_modules,
+        modules_to_save=modules_to_save,
     )
-
 
 def _validate_runtime(
     config: ModelConfig,

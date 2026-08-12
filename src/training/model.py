@@ -270,26 +270,8 @@ def _build_lora_config(
     config: ModelConfig,
 ) -> LoraConfig:
     """
-    Build the PEFT LoRA configuration from the project's
-    canonical nested YAML schema.
-
-    Project configuration uses:
-        lora.rank
-        lora.alpha
-        lora.dropout
-        lora.bias
-        lora.task_type
-        lora.target_modules
-        lora.modules_to_save
-
-    PEFT receives:
-        r
-        lora_alpha
-        lora_dropout
-        bias
-        task_type
-        target_modules
-        modules_to_save
+    Build the PEFT LoRA configuration from the canonical
+    project YAML schema.
     """
 
     if not isinstance(
@@ -323,10 +305,6 @@ def _build_lora_config(
         "modules_to_save",
     }
 
-    rank = int(lora["rank"])
-    alpha = lora["alpha"]
-    dropout = lora["dropout"]
-
     missing_keys = sorted(
         required_keys
         - set(lora_config.keys())
@@ -338,15 +316,19 @@ def _build_lora_config(
             f"{missing_keys}"
         )
 
+    enabled = lora_config[
+        "enabled"
+    ]
+
     if not isinstance(
-        lora_config["enabled"],
+        enabled,
         bool,
     ):
         raise TypeError(
             "lora.enabled must be boolean."
         )
 
-    if not lora_config["enabled"]:
+    if not enabled:
         raise RuntimeError(
             "LoRA is disabled in the project configuration."
         )
@@ -407,7 +389,7 @@ def _build_lora_config(
 
     if task_type != "CAUSAL_LM":
         raise ValueError(
-            "This training pipeline requires "
+            "This pipeline requires "
             "lora.task_type='CAUSAL_LM'."
         )
 
@@ -431,8 +413,8 @@ def _build_lora_config(
         for module_name in target_modules
     ):
         raise ValueError(
-            "Every lora.target_modules entry must be a "
-            "non-empty string."
+            "Every lora.target_modules entry must be "
+            "a non-empty string."
         )
 
     modules_to_save = lora_config[
@@ -458,18 +440,18 @@ def _build_lora_config(
         for module_name in modules_to_save
     ):
         raise ValueError(
-            "Every lora.modules_to_save entry must be a "
-            "non-empty string."
+            "Every lora.modules_to_save entry must be "
+            "a non-empty string."
         )
 
     return LoraConfig(
         r=rank,
         lora_alpha=alpha,
         lora_dropout=float(dropout),
-        bias=lora["bias"],
+        bias=bias,
         task_type="CAUSAL_LM",
-        target_modules=lora["target_modules"],
-        modules_to_save=lora["modules_to_save"],
+        target_modules=target_modules,
+        modules_to_save=modules_to_save,
     )
 
 def _validate_runtime(

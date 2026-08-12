@@ -831,9 +831,6 @@ def _perform_optimizer_step(
         learning_rate,
     )
 
-if batch_index == 0:
-    print("Starting first forward/backward pass.")
-
 def _train_single_batch(
     model: torch.nn.Module,
     batch: dict[str, Any],
@@ -875,211 +872,6 @@ def _train_single_batch(
 
 
 
-def _train_epoch(
-    model: torch.nn.Module,
-    dataloader: DataLoader[Any],
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
-    device: torch.device,
-    gradient_accumulation_steps: int,
-    max_grad_norm: float,
-    global_step: int,
-) -> tuple[float, int, float, float]:
-    """
-    Train the model for one complete epoch.
-
-    Gradient accumulation correctly handles the final partial
-    accumulation window.
-
-    Returns:
-        average_loss,
-        updated_global_step,
-        last_gradient_norm,
-        last_learning_rate
-    """
-
-    if len(dataloader) == 0:
-        raise RuntimeError(
-            "Training dataloader contains no batches."
-        )
-
-    if not isinstance(
-        global_step,
-        int,
-    ) or global_step < 0:
-        raise ValueError(
-            "global_step must be a non-negative integer."
-        )
-
-    if not isinstance(
-        gradient_accumulation_steps,
-        int,
-    ) or gradient_accumulation_steps <= 0:
-        raise ValueError(
-            "gradient_accumulation_steps must be "
-            "a positive integer."
-        )
-
-    model.train()
-
-    optimizer.zero_grad(
-        set_to_none=True
-    )
-
-    total_loss = 0.0
-    total_batches = len(dataloader)
-
-    last_gradient_norm = 0.0
-    last_learning_rate = _get_current_learning_rate(
-        optimizer
-    )
-
-    optimizer_steps = 0
-    print("=" * 80)
-    print("FIRST-BATCH TRAINING DIAGNOSTIC")
-    print("=" * 80)
-    print(f"Total training batches : {total_batches}")
-    print(f"Gradient accumulation  : {gradient_accumulation_steps}")
-
-    for batch_index, batch in enumerate(
-        dataloader
-    ):
-        if batch_index == 0:
-            print("First batch retrieved.")
-
-        remaining_batches = (
-            total_batches - batch_index 
-        )
-        if batch_index == 0:
-            print("First batch retrieved.")
-
-        accumulation_window_size = min(
-            gradient_accumulation_steps,
-            remaining_batches,
-        )
-
-        if (
-            batch_index == 0
-            and torch.cuda.is_available()
-        ):
-            torch.cuda.synchronize()
-            print(
-                "CUDA synchronized before first batch."
-            )
-
-        if batch_index == 0:
-            print(
-                "Starting first forward/backward pass."
-            )
-
-        loss = _train_single_batch(
-            model=model,
-            batch=batch,
-            device=device,
-            accumulation_window_size=(
-                accumulation_window_size
-            ),
-        )
-        if (
-            batch_index == 0
-            and torch.cuda.is_available()
-        ):
-            torch.cuda.synchronize()
-            print(
-                "CUDA synchronized after first forward/backward."
-            )
-
-        if batch_index == 0:
-            print(
-                "First forward/backward pass completed."
-            )
-
-        loss_value = float(
-            loss.detach().cpu().item()
-        )
-
-        if not torch.isfinite(
-            torch.tensor(
-                loss_value,
-                dtype=torch.float64,
-            )
-        ):
-            raise FloatingPointError(
-                "Non-finite training loss detected."
-            )
-
-        total_loss += loss_value
-
-        should_step = _should_optimizer_step(
-            batch_index=batch_index,
-            total_batches=total_batches,
-            gradient_accumulation_steps=(
-                gradient_accumulation_steps
-            ),
-        )
-
-        if should_step:
-
-            if (
-                batch_index == 0
-                and torch.cuda.is_available()
-            ):
-                torch.cuda.synchronize()
-
-            if batch_index == 0:
-                print(
-                    "Starting first optimizer step."
-                )
-
-            (
-                last_gradient_norm,
-                last_learning_rate,
-            ) = _perform_optimizer_step(
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                max_grad_norm=max_grad_norm,
-            )
-
-            if (
-                batch_index == 0
-                and torch.cuda.is_available()
-            ):
-                torch.cuda.synchronize()
-
-            if batch_index == 0:
-                print(
-                    "First optimizer step completed."
-                )
-
-            optimizer_steps += 1
-            global_step += 1
-
-    if optimizer_steps == 0:
-        raise RuntimeError(
-            "Training epoch completed without an optimizer step."
-        )
-
-    average_loss = (
-        total_loss / total_batches
-    )
-
-    if not torch.isfinite(
-        torch.tensor(
-            average_loss,
-            dtype=torch.float64,
-        )
-    ):
-        raise FloatingPointError(
-            "Average training loss is non-finite."
-        )
-
-    return (
-        average_loss,
-        global_step,
-        last_gradient_norm,
-        last_learning_rate,
-    )
 
 
 
@@ -1661,6 +1453,243 @@ def _process_epoch(
 
     return state
 
+
+def _train_epoch(
+    model: torch.nn.Module,
+    dataloader: DataLoader[Any],
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    device: torch.device,
+    gradient_accumulation_steps: int,
+    max_grad_norm: float,
+    global_step: int,
+) -> tuple[float, int, float, float]:
+    """
+    Train the model for one complete epoch.
+
+    Gradient accumulation correctly handles the final partial
+    accumulation window.
+
+    Returns:
+        average_loss,
+        updated_global_step,
+        last_gradient_norm,
+        last_learning_rate
+    """
+
+    if len(dataloader) == 0:
+        raise RuntimeError(
+            "Training dataloader contains no batches."
+        )
+
+    if not isinstance(
+        global_step,
+        int,
+    ) or global_step < 0:
+        raise ValueError(
+            "global_step must be a non-negative integer."
+        )
+
+    if (
+        not isinstance(
+            gradient_accumulation_steps,
+            int,
+        )
+        or gradient_accumulation_steps <= 0
+    ):
+        raise ValueError(
+            "gradient_accumulation_steps must be "
+            "a positive integer."
+        )
+
+    model.train()
+
+    optimizer.zero_grad(
+        set_to_none=True
+    )
+
+    total_loss = 0.0
+    total_batches = len(
+        dataloader
+    )
+
+    last_gradient_norm = 0.0
+
+    last_learning_rate = _get_current_learning_rate(
+        optimizer
+    )
+
+    optimizer_steps = 0
+
+    print("=" * 80)
+    print("FIRST-BATCH TRAINING DIAGNOSTIC")
+    print("=" * 80)
+
+    print(
+        f"Total training batches : "
+        f"{total_batches}"
+    )
+
+    print(
+        f"Gradient accumulation  : "
+        f"{gradient_accumulation_steps}"
+    )
+
+    for batch_index, batch in enumerate(
+        dataloader
+    ):
+
+        if batch_index == 0:
+            print(
+                "First batch retrieved."
+            )
+
+        remaining_batches = (
+            total_batches
+            - batch_index
+        )
+
+        accumulation_window_size = min(
+            gradient_accumulation_steps,
+            remaining_batches,
+        )
+
+        if (
+            batch_index == 0
+            and torch.cuda.is_available()
+        ):
+
+            torch.cuda.synchronize()
+
+            print(
+                "CUDA synchronized before first batch."
+            )
+
+        if batch_index == 0:
+
+            print(
+                "Starting first forward/backward pass."
+            )
+
+        loss = _train_single_batch(
+            model=model,
+            batch=batch,
+            device=device,
+            accumulation_window_size=(
+                accumulation_window_size
+            ),
+        )
+
+        if (
+            batch_index == 0
+            and torch.cuda.is_available()
+        ):
+
+            torch.cuda.synchronize()
+
+            print(
+                "CUDA synchronized after first forward/backward."
+            )
+
+        if batch_index == 0:
+
+            print(
+                "First forward/backward pass completed."
+            )
+
+        loss_value = float(
+            loss.detach().cpu().item()
+        )
+
+        if not torch.isfinite(
+            torch.tensor(
+                loss_value,
+                dtype=torch.float64,
+            )
+        ):
+            raise FloatingPointError(
+                "Non-finite training loss detected."
+            )
+
+        total_loss += loss_value
+
+        should_step = _should_optimizer_step(
+            batch_index=batch_index,
+            total_batches=total_batches,
+            gradient_accumulation_steps=(
+                gradient_accumulation_steps
+            ),
+        )
+
+        if should_step:
+
+            if (
+                batch_index == 0
+                and torch.cuda.is_available()
+            ):
+
+                torch.cuda.synchronize()
+
+            if batch_index == 0:
+
+                print(
+                    "Starting first optimizer step."
+                )
+
+            (
+                last_gradient_norm,
+                last_learning_rate,
+            ) = _perform_optimizer_step(
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                max_grad_norm=max_grad_norm,
+            )
+
+            if (
+                batch_index == 0
+                and torch.cuda.is_available()
+            ):
+
+                torch.cuda.synchronize()
+
+            if batch_index == 0:
+
+                print(
+                    "First optimizer step completed."
+                )
+
+            optimizer_steps += 1
+            global_step += 1
+
+    if optimizer_steps == 0:
+
+        raise RuntimeError(
+            "Training epoch completed without an optimizer step."
+        )
+
+    average_loss = (
+        total_loss
+        / total_batches
+    )
+
+    if not torch.isfinite(
+        torch.tensor(
+            average_loss,
+            dtype=torch.float64,
+        )
+    ):
+
+        raise FloatingPointError(
+            "Average training loss is non-finite."
+        )
+
+    return (
+        average_loss,
+        global_step,
+        last_gradient_norm,
+        last_learning_rate,
+    )
 
 def _resume_training_state(
     model: torch.nn.Module,

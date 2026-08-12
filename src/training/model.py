@@ -963,6 +963,8 @@ def _print_model_summary(
     )
 
     print("=" * 80)
+
+    
 def _print_model_memory(
     model: PreTrainedModel,
 ) -> None:

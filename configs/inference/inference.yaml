@@ -1,36 +1,26 @@
 inference:
-  base_model:
-    name: Qwen/Qwen2.5-3B-Instruct
+  enabled: true
 
-  adapter:
-    directory: artifacts/lora_adapter
-
-  tokenizer:
-    directory: artifacts/lora_adapter
+  model:
+    use_trained_adapter: true
+    adapter_directory: artifacts/lora_adapter
 
   generation:
     max_new_tokens: 256
-
-    min_new_tokens: 1
-
-    temperature: 0.0
-
     do_sample: false
-
+    temperature: 0.0
     top_p: 1.0
-
-    top_k: 50
-
     repetition_penalty: 1.0
-
     no_repeat_ngram_size: 0
+    early_stopping: true
 
-  input:
-    max_length: 512
+  chat:
+    enabled: true
+    max_history: 10
 
-  device:
-    device_map: auto
+  reproducibility:
+    seed: 42
 
-  validation:
-    require_adapter: true
-    require_tokenizer: true
+  output:
+    save_responses: false
+    directory: artifacts/inference

@@ -27,16 +27,12 @@ training:
     shuffle_train: true
     shuffle_validation: false
     shuffle_test: false
-
     num_workers: 2
-
     pin_memory: true
-
     persistent_workers: true
 
   validation:
     enabled: true
-
     frequency: epoch
 
   gradient_checkpointing:

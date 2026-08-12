@@ -22,13 +22,9 @@ lora:
   enabled: true
 
   rank: 16
-
   alpha: 32
-
   dropout: 0.05
-
   bias: none
-
   task_type: CAUSAL_LM
 
   target_modules:
@@ -42,11 +38,9 @@ lora:
 
   modules_to_save: []
 
-training:
-  prepare_model_for_kbit_training: true
-
-validation:
-  require_cuda_for_4bit: true
-  require_peft_model: true
-  require_frozen_base_model: true
-  require_trainable_lora_parameters: true
+tokenizer:
+  padding_side: right
+  truncation_side: right
+  use_fast: true
+  add_eos_token: true
+  add_bos_token: false

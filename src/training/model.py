@@ -353,7 +353,7 @@ def _validate_runtime(
     for the configured QLoRA training setup.
     """
 
-    quantization = config["quantization"]
+    quantization = config["model"]["quantization"]
 
     load_in_4bit = bool(
         quantization["load_in_4bit"]

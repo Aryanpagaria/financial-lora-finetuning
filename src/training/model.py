@@ -823,8 +823,10 @@ def _validate_trainable_parameters(
     )
 
     print("=" * 80)
+
+
 def _print_model_summary(
-    model: PreTrainedModel,
+    model: PreTrainedModel | PeftModel,
     config: ModelConfig,
 ) -> None:
     """
@@ -834,10 +836,11 @@ def _print_model_summary(
 
     if not isinstance(
         model,
-        PreTrainedModel,
+        (PreTrainedModel, PeftModel),
     ):
         raise TypeError(
-            "model must be a transformers PreTrainedModel."
+            "model must be a Transformers PreTrainedModel "
+            "or a PEFT PeftModel."
         )
 
     if not isinstance(
@@ -960,8 +963,6 @@ def _print_model_summary(
     )
 
     print("=" * 80)
-
-
 def _print_model_memory(
     model: PreTrainedModel,
 ) -> None:

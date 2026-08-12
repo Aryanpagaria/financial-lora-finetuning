@@ -607,9 +607,7 @@ def _prepare_for_qlora(
     Prepare a quantized model for QLoRA training.
     """
 
-    quantization = config[
-        "quantization"
-    ]
+    quantization = config["model"]["quantization"]
 
     if not bool(
         quantization["load_in_4bit"]
@@ -840,9 +838,7 @@ def _print_model_summary(
         )
     )
 
-    quantization = config[
-        "quantization"
-    ]
+    quantization = config["model"]["quantization"]
 
     lora = config[
         "lora"

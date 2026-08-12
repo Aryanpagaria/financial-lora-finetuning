@@ -831,6 +831,9 @@ def _perform_optimizer_step(
         learning_rate,
     )
 
+if batch_index == 0:
+    print("Starting first forward/backward pass.")
+
 def _train_single_batch(
     model: torch.nn.Module,
     batch: dict[str, Any],
@@ -932,19 +935,42 @@ def _train_epoch(
     )
 
     optimizer_steps = 0
+    print("=" * 80)
+    print("FIRST-BATCH TRAINING DIAGNOSTIC")
+    print("=" * 80)
+    print(f"Total training batches : {total_batches}")
+    print(f"Gradient accumulation  : {gradient_accumulation_steps}")
 
     for batch_index, batch in enumerate(
         dataloader
     ):
+        if batch_index == 0:
+            print("First batch retrieved.")
 
         remaining_batches = (
-            total_batches - batch_index
+            total_batches - batch_index 
         )
+        if batch_index == 0:
+            print("First batch retrieved.")
 
         accumulation_window_size = min(
             gradient_accumulation_steps,
             remaining_batches,
         )
+
+        if (
+            batch_index == 0
+            and torch.cuda.is_available()
+        ):
+            torch.cuda.synchronize()
+            print(
+                "CUDA synchronized before first batch."
+            )
+
+        if batch_index == 0:
+            print(
+                "Starting first forward/backward pass."
+            )
 
         loss = _train_single_batch(
             model=model,
@@ -954,6 +980,19 @@ def _train_epoch(
                 accumulation_window_size
             ),
         )
+        if (
+            batch_index == 0
+            and torch.cuda.is_available()
+        ):
+            torch.cuda.synchronize()
+            print(
+                "CUDA synchronized after first forward/backward."
+            )
+
+        if batch_index == 0:
+            print(
+                "First forward/backward pass completed."
+            )
 
         loss_value = float(
             loss.detach().cpu().item()
@@ -981,6 +1020,17 @@ def _train_epoch(
 
         if should_step:
 
+            if (
+                batch_index == 0
+                and torch.cuda.is_available()
+            ):
+                torch.cuda.synchronize()
+
+            if batch_index == 0:
+                print(
+                    "Starting first optimizer step."
+                )
+
             (
                 last_gradient_norm,
                 last_learning_rate,
@@ -990,6 +1040,17 @@ def _train_epoch(
                 scheduler=scheduler,
                 max_grad_norm=max_grad_norm,
             )
+
+            if (
+                batch_index == 0
+                and torch.cuda.is_available()
+            ):
+                torch.cuda.synchronize()
+
+            if batch_index == 0:
+                print(
+                    "First optimizer step completed."
+                )
 
             optimizer_steps += 1
             global_step += 1

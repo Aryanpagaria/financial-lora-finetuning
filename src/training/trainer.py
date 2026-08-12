@@ -2165,9 +2165,9 @@ def _build_training_dataloaders(
         validation_dataloader,
     )
 
-
 def _build_training_components(
     training_config: dict[str, Any],
+    dataloader_length: int,
 ) -> tuple[
     torch.nn.Module,
     torch.optim.Optimizer,
@@ -2176,6 +2176,10 @@ def _build_training_components(
     """
     Build the model, optimizer, and scheduler using the
     project's dedicated training modules.
+
+    The scheduler receives the actual training DataLoader length
+    and gradient accumulation factor so it can calculate the
+    number of optimizer update steps correctly.
     """
 
     if not isinstance(
@@ -2184,6 +2188,27 @@ def _build_training_components(
     ):
         raise TypeError(
             "training_config must be a dictionary."
+        )
+
+    if not isinstance(
+        dataloader_length,
+        int,
+    ) or dataloader_length <= 0:
+        raise ValueError(
+            "dataloader_length must be a positive integer."
+        )
+
+    gradient_accumulation_steps = training_config[
+        "gradient_accumulation_steps"
+    ]
+
+    if not isinstance(
+        gradient_accumulation_steps,
+        int,
+    ) or gradient_accumulation_steps <= 0:
+        raise ValueError(
+            "training.gradient_accumulation_steps must be "
+            "a positive integer."
         )
 
     from src.training.model import (
@@ -2223,6 +2248,10 @@ def _build_training_components(
 
     scheduler = get_scheduler(
         optimizer=optimizer,
+        dataloader_length=dataloader_length,
+        gradient_accumulation_steps=(
+            gradient_accumulation_steps
+        ),
     )
 
     if not isinstance(
@@ -2231,7 +2260,7 @@ def _build_training_components(
     ):
         raise TypeError(
             "get_scheduler() must return "
-            "a PyTorch learning-rate scheduler."
+            "a torch.optim.lr_scheduler.LRScheduler."
         )
 
     return (
@@ -2407,6 +2436,7 @@ def _validate_training_components(
 
 def _prepare_training_pipeline(
     training_config: dict[str, Any],
+    dataloader_length: int,
 ) -> tuple[
     torch.nn.Module,
     torch.optim.Optimizer,
@@ -2417,12 +2447,21 @@ def _prepare_training_pipeline(
     Build and validate all components required by the trainer.
     """
 
+    if not isinstance(
+        dataloader_length,
+        int,
+    ) or dataloader_length <= 0:
+        raise ValueError(
+            "dataloader_length must be a positive integer."
+        )
+
     (
         model,
         optimizer,
         scheduler,
     ) = _build_training_components(
         training_config=training_config,
+        dataloader_length=dataloader_length,
     )
 
     _validate_training_components(
@@ -2445,7 +2484,6 @@ def _prepare_training_pipeline(
         scheduler,
         device,
     )
-
 
 def train(
     tokenized_dataset: dict[
@@ -2519,6 +2557,7 @@ def train(
         device,
     ) = _prepare_training_pipeline(
         training_config=training_config,
+        dataloader_length=len(train_dataloader),
     )
 
     state = _resume_training_state(

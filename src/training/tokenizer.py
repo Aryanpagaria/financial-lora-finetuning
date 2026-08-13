@@ -180,6 +180,91 @@ def _tokenize_split(
 
     return tokenized_split
 
+def _validate_tokenized_supervision(
+    tokenized_dataset: TokenizedDataset,
+) -> None:
+    """
+    Validate that every tokenized sample contains at least
+    one supervised target token.
+
+    Causal language-model labels may use -100 for ignored
+    positions, but a sample containing only -100 labels has
+    no training signal and can produce an invalid mean loss.
+    """
+
+    if not isinstance(
+        tokenized_dataset,
+        dict,
+    ):
+        raise TypeError(
+            "tokenized_dataset must be a dictionary."
+        )
+
+    for split_name, samples in tokenized_dataset.items():
+
+        if not isinstance(
+            samples,
+            list,
+        ):
+            raise TypeError(
+                f"Tokenized split '{split_name}' must be a list."
+            )
+
+        invalid_samples: list[int] = []
+
+        for index, sample in enumerate(
+            samples
+        ):
+
+            if not isinstance(
+                sample,
+                dict,
+            ):
+                raise TypeError(
+                    f"Tokenized sample {index} in split "
+                    f"'{split_name}' must be a dictionary."
+                )
+
+            if "labels" not in sample:
+                raise RuntimeError(
+                    f"Tokenized sample {index} in split "
+                    f"'{split_name}' is missing labels."
+                )
+
+            labels = sample["labels"]
+
+            if not isinstance(
+                labels,
+                list,
+            ):
+                raise TypeError(
+                    f"Labels for sample {index} in split "
+                    f"'{split_name}' must be a list."
+                )
+
+            valid_label_count = sum(
+                1
+                for label in labels
+                if label != -100
+            )
+
+            if valid_label_count == 0:
+                invalid_samples.append(
+                    index
+                )
+
+        if invalid_samples:
+
+            preview = invalid_samples[:20]
+
+            raise ValueError(
+                f"Split '{split_name}' contains "
+                f"{len(invalid_samples)} samples with no "
+                f"valid supervised labels. "
+                f"All labels are -100. "
+                f"First invalid indices: {preview}"
+            )
+
 def get_tokenized_dataset(
 ) -> TokenizedDataset:
     """
@@ -217,6 +302,10 @@ def get_tokenized_dataset(
 
     print_dataset_statistics(
         tokenized_dataset,
+    )
+    
+    _validate_tokenized_supervision(
+        tokenized_dataset
     )
 
     return tokenized_dataset

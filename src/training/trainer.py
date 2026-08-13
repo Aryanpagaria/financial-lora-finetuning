@@ -535,6 +535,36 @@ def _prepare_batch(
             "labels must use an integer tensor dtype."
         )
 
+    valid_label_count = int(
+        labels.ne(-100).sum().item()
+    )
+
+    if valid_label_count == 0:
+        print("=" * 80)
+        print("INVALID SUPERVISION BATCH")
+        print("=" * 80)
+
+        print(
+            f"Valid labels : {valid_label_count}"
+        )
+
+        print(
+            f"Input shape  : "
+            f"{tuple(input_ids.shape)}"
+        )
+
+        print(
+            f"Label shape  : "
+            f"{tuple(labels.shape)}"
+        )
+
+        print("=" * 80)
+
+        raise ValueError(
+            "Training batch contains no valid supervised labels. "
+            "All label positions are -100."
+        )
+
     return prepared_batch
 
 

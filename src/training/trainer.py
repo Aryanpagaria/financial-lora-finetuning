@@ -757,6 +757,9 @@ def _perform_optimizer_step(
     Clip gradients, update model parameters, advance the
     learning-rate scheduler, and clear accumulated gradients.
 
+    Numerical diagnostics detect non-finite gradients before the
+    optimizer update and non-finite trainable parameters afterward.
+
     Returns:
         A tuple containing:
         - gradient norm
@@ -787,12 +790,139 @@ def _perform_optimizer_step(
             "scheduler must be a PyTorch learning-rate scheduler."
         )
 
+    non_finite_gradients: list[str] = []
+
+    for parameter_name, parameter in (
+        model.named_parameters()
+    ):
+
+        if not parameter.requires_grad:
+            continue
+
+        gradient = parameter.grad
+
+        if gradient is None:
+            continue
+
+        if not torch.isfinite(
+            gradient.detach()
+        ).all():
+
+            non_finite_gradients.append(
+                parameter_name
+            )
+
+    if non_finite_gradients:
+
+        print("=" * 80)
+        print(
+            "NON-FINITE GRADIENTS BEFORE OPTIMIZER STEP"
+        )
+        print("=" * 80)
+
+        print(
+            f"Affected Parameters : "
+            f"{len(non_finite_gradients)}"
+        )
+
+        for parameter_name in (
+            non_finite_gradients[:20]
+        ):
+
+            print(
+                f"  - {parameter_name}"
+            )
+
+        if len(
+            non_finite_gradients
+        ) > 20:
+
+            print(
+                f"  ... and "
+                f"{len(non_finite_gradients) - 20} "
+                f"additional parameters."
+            )
+
+        print("=" * 80)
+
+        raise FloatingPointError(
+            "Non-finite gradient detected before "
+            "optimizer.step()."
+        )
+
     gradient_norm = _clip_gradients(
         model=model,
         max_grad_norm=max_grad_norm,
     )
 
+    if not torch.isfinite(
+        torch.tensor(
+            gradient_norm,
+            dtype=torch.float64,
+        )
+    ):
+
+        raise FloatingPointError(
+            "Gradient norm is non-finite before "
+            "the optimizer update."
+        )
+
     optimizer.step()
+
+    non_finite_parameters: list[str] = []
+
+    for parameter_name, parameter in (
+        model.named_parameters()
+    ):
+
+        if not parameter.requires_grad:
+            continue
+
+        if not torch.isfinite(
+            parameter.detach()
+        ).all():
+
+            non_finite_parameters.append(
+                parameter_name
+            )
+
+    if non_finite_parameters:
+
+        print("=" * 80)
+        print(
+            "NON-FINITE PARAMETERS AFTER OPTIMIZER STEP"
+        )
+        print("=" * 80)
+
+        print(
+            f"Affected Parameters : "
+            f"{len(non_finite_parameters)}"
+        )
+
+        for parameter_name in (
+            non_finite_parameters[:20]
+        ):
+
+            print(
+                f"  - {parameter_name}"
+            )
+
+        if len(
+            non_finite_parameters
+        ) > 20:
+
+            print(
+                f"  ... and "
+                f"{len(non_finite_parameters) - 20} "
+                f"additional parameters."
+            )
+
+        print("=" * 80)
+
+        raise FloatingPointError(
+            "Optimizer step produced non-finite "
+            "trainable parameters."
+        )
 
     scheduler.step()
 
@@ -819,9 +949,11 @@ def _perform_optimizer_step(
 
     if not torch.isfinite(
         torch.tensor(
-            learning_rate
+            learning_rate,
+            dtype=torch.float64,
         )
     ):
+
         raise FloatingPointError(
             "Optimizer produced a non-finite learning rate."
         )
@@ -830,6 +962,7 @@ def _perform_optimizer_step(
         gradient_norm,
         learning_rate,
     )
+
 
 def _train_single_batch(
     model: torch.nn.Module,
@@ -842,6 +975,9 @@ def _train_single_batch(
 
     The loss is divided by the actual number of batches in the
     current accumulation window before backpropagation.
+
+    Numerical diagnostics are emitted when the model produces
+    non-finite logits, loss, gradients, or other invalid values.
     """
 
     prepared_batch = _prepare_batch(
@@ -851,30 +987,294 @@ def _train_single_batch(
 
     model.train()
 
+    input_ids = prepared_batch[
+        "input_ids"
+    ]
+
+    attention_mask = prepared_batch[
+        "attention_mask"
+    ]
+
+    labels = prepared_batch[
+        "labels"
+    ]
+
     outputs = model(
-        input_ids=prepared_batch["input_ids"],
-        attention_mask=prepared_batch["attention_mask"],
-        labels=prepared_batch["labels"],
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        labels=labels,
     )
 
-    loss = _validate_model_output_loss(
-        outputs
+    if outputs is None:
+        raise RuntimeError(
+            "Model returned no output."
+        )
+
+    logits = getattr(
+        outputs,
+        "logits",
+        None,
     )
+
+    loss = getattr(
+        outputs,
+        "loss",
+        None,
+    )
+
+    if logits is not None:
+
+        if not isinstance(
+            logits,
+            torch.Tensor,
+        ):
+            raise TypeError(
+                "Model logits must be a torch.Tensor."
+            )
+
+        if logits.numel() == 0:
+            raise RuntimeError(
+                "Model returned empty logits."
+            )
+
+        if not torch.isfinite(
+            logits.detach()
+        ).all():
+
+            detached_logits = (
+                logits.detach()
+            )
+
+            finite_logits = detached_logits[
+                torch.isfinite(
+                    detached_logits
+                )
+            ]
+
+            print("=" * 80)
+            print(
+                "NON-FINITE LOGITS DETECTED"
+            )
+            print("=" * 80)
+
+            print(
+                f"Logits Shape : "
+                f"{tuple(detached_logits.shape)}"
+            )
+
+            print(
+                f"Logits Dtype : "
+                f"{detached_logits.dtype}"
+            )
+
+            print(
+                f"Logits Device : "
+                f"{detached_logits.device}"
+            )
+
+            print(
+                f"Finite Values : "
+                f"{finite_logits.numel():,}"
+            )
+
+            if finite_logits.numel() > 0:
+
+                print(
+                    f"Finite Min   : "
+                    f"{finite_logits.min().item()}"
+                )
+
+                print(
+                    f"Finite Max   : "
+                    f"{finite_logits.max().item()}"
+                )
+
+            print(
+                f"Input Shape   : "
+                f"{tuple(input_ids.shape)}"
+            )
+
+            print(
+                f"Label Shape   : "
+                f"{tuple(labels.shape)}"
+            )
+
+            print("=" * 80)
+
+            raise FloatingPointError(
+                "Model produced non-finite logits."
+            )
+
+    if loss is None:
+        raise RuntimeError(
+            "Model output does not contain a loss. "
+            "Ensure labels are passed to the model."
+        )
+
+    if not isinstance(
+        loss,
+        torch.Tensor,
+    ):
+        raise TypeError(
+            "Model loss must be a torch.Tensor."
+        )
+
+    if loss.ndim != 0:
+        raise ValueError(
+            "Model loss must be a scalar tensor."
+        )
+
+    detached_loss = loss.detach()
+
+    if not torch.isfinite(
+        detached_loss
+    ).all():
+
+        print("=" * 80)
+        print(
+            "NON-FINITE LOSS DETECTED"
+        )
+        print("=" * 80)
+
+        print(
+            f"Loss       : "
+            f"{detached_loss.float().item()}"
+        )
+
+        print(
+            f"Loss Dtype : "
+            f"{detached_loss.dtype}"
+        )
+
+        print(
+            f"Loss Device: "
+            f"{detached_loss.device}"
+        )
+
+        print(
+            f"Input Shape: "
+            f"{tuple(input_ids.shape)}"
+        )
+
+        print(
+            f"Label Shape: "
+            f"{tuple(labels.shape)}"
+        )
+
+        print("=" * 80)
+
+        raise FloatingPointError(
+            "Model produced a non-finite loss."
+        )
+
+    if not loss.requires_grad:
+        raise RuntimeError(
+            "Model loss does not require gradients. "
+            "Verify that the model is in training mode "
+            "and trainable parameters are configured correctly."
+        )
 
     scaled_loss = _scale_loss_for_accumulation(
         loss=loss,
-        accumulation_window_size=accumulation_window_size,
+        accumulation_window_size=(
+            accumulation_window_size
+        ),
     )
+
+    if not torch.isfinite(
+        scaled_loss.detach()
+    ).all():
+
+        print("=" * 80)
+        print(
+            "NON-FINITE SCALED LOSS DETECTED"
+        )
+        print("=" * 80)
+
+        print(
+            f"Original Loss : "
+            f"{loss.detach().float().item()}"
+        )
+
+        print(
+            f"Scaled Loss   : "
+            f"{scaled_loss.detach().float().item()}"
+        )
+
+        print(
+            f"Accumulation Window : "
+            f"{accumulation_window_size}"
+        )
+
+        print("=" * 80)
+
+        raise FloatingPointError(
+            "Scaled training loss is non-finite."
+        )
 
     scaled_loss.backward()
 
-    return loss.detach()
+    non_finite_gradients: list[str] = []
 
+    for parameter_name, parameter in (
+        model.named_parameters()
+    ):
 
+        if not parameter.requires_grad:
+            continue
 
+        gradient = parameter.grad
 
+        if gradient is None:
+            continue
 
+        if not torch.isfinite(
+            gradient.detach()
+        ).all():
 
+            non_finite_gradients.append(
+                parameter_name
+            )
+
+    if non_finite_gradients:
+
+        print("=" * 80)
+        print(
+            "NON-FINITE GRADIENTS DETECTED"
+        )
+        print("=" * 80)
+
+        print(
+            f"Affected Parameters : "
+            f"{len(non_finite_gradients)}"
+        )
+
+        for parameter_name in (
+            non_finite_gradients[:20]
+        ):
+
+            print(
+                f"  - {parameter_name}"
+            )
+
+        if len(
+            non_finite_gradients
+        ) > 20:
+
+            print(
+                f"  ... and "
+                f"{len(non_finite_gradients) - 20} "
+                f"additional parameters."
+            )
+
+        print("=" * 80)
+
+        raise FloatingPointError(
+            "Non-finite gradient detected "
+            "during backward propagation."
+        )
+
+    return detached_loss
 
 
 def _validate_single_batch(
@@ -1641,14 +2041,25 @@ def _train_epoch(
                 remaining_batches,
             )
 
-            loss = _train_single_batch(
-                model=model,
-                batch=batch,
-                device=device,
-                accumulation_window_size=(
-                    accumulation_window_size
-                ),
-            )
+            try:
+
+                loss = _train_single_batch(
+                    model=model,
+                    batch=batch,
+                    device=device,
+                    accumulation_window_size=(
+                        accumulation_window_size
+                    ),
+                )
+
+            except FloatingPointError as error:
+
+                raise FloatingPointError(
+                    f"Training became numerically unstable "
+                    f"at batch {batch_index + 1} "
+                    f"of {total_batches} during epoch "
+                    f"{current_epoch}/{total_epochs}."
+                ) from error
 
             if batch_index == 0:
 

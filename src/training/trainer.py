@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-
+from tqdm.auto import tqdm
 import torch
 from torch.utils.data import DataLoader, Dataset
 
@@ -1371,6 +1371,12 @@ def _process_epoch(
         global_step=int(
             state["global_step"]
         ),
+        current_epoch=int(
+            state["epoch"]
+        ) + 1,
+        total_epochs=int(
+            training_config["epochs"]
+        ),
     )
 
     validation_loss = None
@@ -1454,6 +1460,29 @@ def _process_epoch(
     return state
 
 
+
+
+def _enable_training_optimizations(
+    model: PreTrainedModel,
+) -> PreTrainedModel:
+    """
+    Enable memory-saving training optimizations.
+    """
+
+    model.config.use_cache = False
+
+    if not model.is_gradient_checkpointing:
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={
+                "use_reentrant": False,
+            }
+        )
+
+    model.enable_input_require_grads()
+
+    return model
+
+
 def _train_epoch(
     model: torch.nn.Module,
     dataloader: DataLoader[Any],
@@ -1463,12 +1492,17 @@ def _train_epoch(
     gradient_accumulation_steps: int,
     max_grad_norm: float,
     global_step: int,
+    current_epoch: int,
+    total_epochs: int,
 ) -> tuple[float, int, float, float]:
     """
     Train the model for one complete epoch.
 
     Gradient accumulation correctly handles the final partial
     accumulation window.
+
+    The progress bar reports batch progress, loss, learning rate,
+    optimizer step, elapsed time, and estimated remaining time.
 
     Returns:
         average_loss,
@@ -1502,6 +1536,27 @@ def _train_epoch(
             "a positive integer."
         )
 
+    if not isinstance(
+        current_epoch,
+        int,
+    ) or current_epoch <= 0:
+        raise ValueError(
+            "current_epoch must be a positive integer."
+        )
+
+    if not isinstance(
+        total_epochs,
+        int,
+    ) or total_epochs <= 0:
+        raise ValueError(
+            "total_epochs must be a positive integer."
+        )
+
+    if current_epoch > total_epochs:
+        raise ValueError(
+            "current_epoch cannot exceed total_epochs."
+        )
+
     model.train()
 
     optimizer.zero_grad(
@@ -1509,20 +1564,25 @@ def _train_epoch(
     )
 
     total_loss = 0.0
+
     total_batches = len(
         dataloader
     )
 
     last_gradient_norm = 0.0
 
-    last_learning_rate = _get_current_learning_rate(
-        optimizer
+    last_learning_rate = (
+        _get_current_learning_rate(
+            optimizer
+        )
     )
 
     optimizer_steps = 0
 
     print("=" * 80)
-    print("FIRST-BATCH TRAINING DIAGNOSTIC")
+    print(
+        f"TRAINING EPOCH {current_epoch}/{total_epochs}"
+    )
     print("=" * 80)
 
     print(
@@ -1535,137 +1595,164 @@ def _train_epoch(
         f"{gradient_accumulation_steps}"
     )
 
-    for batch_index, batch in enumerate(
-        dataloader
-    ):
+    progress_bar = tqdm(
+        dataloader,
+        total=total_batches,
+        desc=(
+            f"Epoch {current_epoch}/{total_epochs}"
+        ),
+        unit="batch",
+        dynamic_ncols=True,
+    )
 
-        if batch_index == 0:
-            print(
-                "First batch retrieved."
-            )
+    try:
 
-        remaining_batches = (
-            total_batches
-            - batch_index
-        )
-
-        accumulation_window_size = min(
-            gradient_accumulation_steps,
-            remaining_batches,
-        )
-
-        if (
-            batch_index == 0
-            and torch.cuda.is_available()
+        for batch_index, batch in enumerate(
+            progress_bar
         ):
-
-            torch.cuda.synchronize()
-
-            print(
-                "CUDA synchronized before first batch."
-            )
-
-        if batch_index == 0:
-
-            print(
-                "Starting first forward/backward pass."
-            )
-
-        loss = _train_single_batch(
-            model=model,
-            batch=batch,
-            device=device,
-            accumulation_window_size=(
-                accumulation_window_size
-            ),
-        )
-
-        if (
-            batch_index == 0
-            and torch.cuda.is_available()
-        ):
-
-            torch.cuda.synchronize()
-
-            print(
-                "CUDA synchronized after first forward/backward."
-            )
-
-        if batch_index == 0:
-
-            print(
-                "First forward/backward pass completed."
-            )
-
-        loss_value = float(
-            loss.detach().cpu().item()
-        )
-
-        if not torch.isfinite(
-            torch.tensor(
-                loss_value,
-                dtype=torch.float64,
-            )
-        ):
-            raise FloatingPointError(
-                "Non-finite training loss detected."
-            )
-
-        total_loss += loss_value
-
-        should_step = _should_optimizer_step(
-            batch_index=batch_index,
-            total_batches=total_batches,
-            gradient_accumulation_steps=(
-                gradient_accumulation_steps
-            ),
-        )
-
-        if should_step:
-
-            if (
-                batch_index == 0
-                and torch.cuda.is_available()
-            ):
-
-                torch.cuda.synchronize()
 
             if batch_index == 0:
 
                 print(
-                    "Starting first optimizer step."
+                    "First batch retrieved."
                 )
 
-            (
-                last_gradient_norm,
-                last_learning_rate,
-            ) = _perform_optimizer_step(
+                if torch.cuda.is_available():
+
+                    torch.cuda.synchronize()
+
+                    print(
+                        "CUDA synchronized before "
+                        "first batch."
+                    )
+
+                print(
+                    "Starting first "
+                    "forward/backward pass."
+                )
+
+            remaining_batches = (
+                total_batches
+                - batch_index
+            )
+
+            accumulation_window_size = min(
+                gradient_accumulation_steps,
+                remaining_batches,
+            )
+
+            loss = _train_single_batch(
                 model=model,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                max_grad_norm=max_grad_norm,
+                batch=batch,
+                device=device,
+                accumulation_window_size=(
+                    accumulation_window_size
+                ),
             )
-
-            if (
-                batch_index == 0
-                and torch.cuda.is_available()
-            ):
-
-                torch.cuda.synchronize()
 
             if batch_index == 0:
 
+                if torch.cuda.is_available():
+
+                    torch.cuda.synchronize()
+
+                    print(
+                        "CUDA synchronized after "
+                        "first forward/backward."
+                    )
+
                 print(
-                    "First optimizer step completed."
+                    "First forward/backward "
+                    "pass completed."
                 )
 
-            optimizer_steps += 1
-            global_step += 1
+            loss_value = float(
+                loss.detach()
+                .cpu()
+                .item()
+            )
+
+            if not torch.isfinite(
+                torch.tensor(
+                    loss_value,
+                    dtype=torch.float64,
+                )
+            ):
+                raise FloatingPointError(
+                    "Non-finite training loss detected."
+                )
+
+            total_loss += loss_value
+
+            should_step = (
+                _should_optimizer_step(
+                    batch_index=batch_index,
+                    total_batches=total_batches,
+                    gradient_accumulation_steps=(
+                        gradient_accumulation_steps
+                    ),
+                )
+            )
+
+            if should_step:
+
+                if (
+                    batch_index == 0
+                    and torch.cuda.is_available()
+                ):
+
+                    torch.cuda.synchronize()
+
+                if batch_index == 0:
+
+                    print(
+                        "Starting first "
+                        "optimizer step."
+                    )
+
+                (
+                    last_gradient_norm,
+                    last_learning_rate,
+                ) = _perform_optimizer_step(
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    max_grad_norm=max_grad_norm,
+                )
+
+                if (
+                    batch_index == 0
+                    and torch.cuda.is_available()
+                ):
+
+                    torch.cuda.synchronize()
+
+                if batch_index == 0:
+
+                    print(
+                        "First optimizer step "
+                        "completed."
+                    )
+
+                optimizer_steps += 1
+
+                global_step += 1
+
+            progress_bar.set_postfix(
+                loss=f"{loss_value:.4f}",
+                lr=f"{last_learning_rate:.3e}",
+                step=global_step,
+            )
+
+    finally:
+
+        progress_bar.close()
 
     if optimizer_steps == 0:
 
         raise RuntimeError(
-            "Training epoch completed without an optimizer step."
+            "Training epoch completed without "
+            "an optimizer step."
         )
 
     average_loss = (
@@ -1684,12 +1771,44 @@ def _train_epoch(
             "Average training loss is non-finite."
         )
 
+    print(
+        f"Epoch {current_epoch}/{total_epochs} "
+        "training pass completed."
+    )
+
+    print(
+        f"Optimizer Updates : "
+        f"{optimizer_steps:,}"
+    )
+
+    print(
+        f"Average Train Loss : "
+        f"{average_loss:.6f}"
+    )
+
+    print(
+        f"Global Step        : "
+        f"{global_step:,}"
+    )
+
+    print(
+        f"Learning Rate      : "
+        f"{last_learning_rate:.10f}"
+    )
+
+    print(
+        f"Gradient Norm      : "
+        f"{last_gradient_norm:.6f}"
+    )
+
     return (
         average_loss,
         global_step,
         last_gradient_norm,
         last_learning_rate,
     )
+
+
 
 def _resume_training_state(
     model: torch.nn.Module,
@@ -2018,7 +2137,7 @@ class TokenizedTorchDataset(
     Dataset[dict[str, torch.Tensor]]
 ):
     """
-    PyTorch Dataset wrapper for the tokenized financial dataset.
+    PyTorch Dataset containing pre-converted token tensors.
     """
 
     def __init__(
@@ -2026,7 +2145,7 @@ class TokenizedTorchDataset(
         samples: list[dict[str, Any]],
     ) -> None:
         """
-        Initialize the dataset from tokenized samples.
+        Convert tokenized Python sequences to tensors once.
         """
 
         if not isinstance(
@@ -2048,10 +2167,13 @@ class TokenizedTorchDataset(
             "labels",
         }
 
+        self.samples: list[
+            dict[str, torch.Tensor]
+        ] = []
+
         for index, sample in enumerate(
             samples
         ):
-
             if not isinstance(
                 sample,
                 dict,
@@ -2071,7 +2193,66 @@ class TokenizedTorchDataset(
                     f"required fields: {missing_keys}"
                 )
 
-        self.samples = samples
+            input_ids = torch.as_tensor(
+                sample["input_ids"],
+                dtype=torch.long,
+            )
+
+            attention_mask = torch.as_tensor(
+                sample["attention_mask"],
+                dtype=torch.long,
+            )
+
+            labels = torch.as_tensor(
+                sample["labels"],
+                dtype=torch.long,
+            )
+
+            if input_ids.ndim != 1:
+                raise ValueError(
+                    f"Sample {index} input_ids must be one-dimensional."
+                )
+
+            if attention_mask.ndim != 1:
+                raise ValueError(
+                    f"Sample {index} attention_mask must be one-dimensional."
+                )
+
+            if labels.ndim != 1:
+                raise ValueError(
+                    f"Sample {index} labels must be one-dimensional."
+                )
+
+            if (
+                input_ids.shape
+                != attention_mask.shape
+            ):
+                raise RuntimeError(
+                    f"Sample {index} input_ids and attention_mask "
+                    "have different shapes."
+                )
+
+            if (
+                input_ids.shape
+                != labels.shape
+            ):
+                raise RuntimeError(
+                    f"Sample {index} input_ids and labels "
+                    "have different shapes."
+                )
+
+            if input_ids.numel() == 0:
+                raise ValueError(
+                    f"Sample {index} input_ids is empty."
+                )
+
+            self.samples.append(
+                {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "labels": labels,
+                }
+            )
 
     def __len__(
         self,
@@ -2089,7 +2270,7 @@ class TokenizedTorchDataset(
         index: int,
     ) -> dict[str, torch.Tensor]:
         """
-        Return one sample as PyTorch tensors.
+        Return a pre-converted tensor sample.
         """
 
         if not isinstance(
@@ -2111,43 +2292,16 @@ class TokenizedTorchDataset(
             index
         ]
 
-        input_ids = torch.tensor(
-            sample["input_ids"],
-            dtype=torch.long,
-        )
-
-        attention_mask = torch.tensor(
-            sample["attention_mask"],
-            dtype=torch.long,
-        )
-
-        labels = torch.tensor(
-            sample["labels"],
-            dtype=torch.long,
-        )
-
-        if (
-            input_ids.shape
-            != attention_mask.shape
-        ):
-            raise RuntimeError(
-                "input_ids and attention_mask "
-                "have different shapes."
-            )
-
-        if (
-            input_ids.shape
-            != labels.shape
-        ):
-            raise RuntimeError(
-                "input_ids and labels "
-                "have different shapes."
-            )
-
         return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
+            "input_ids": sample[
+                "input_ids"
+            ],
+            "attention_mask": sample[
+                "attention_mask"
+            ],
+            "labels": sample[
+                "labels"
+            ],
         }
 
 

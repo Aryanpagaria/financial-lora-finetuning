@@ -27,7 +27,8 @@ training:
     shuffle_train: true
     shuffle_validation: false
     shuffle_test: false
-    num_workers: 2
+
+    num_workers: 0
     pin_memory: true
     persistent_workers: false
 
@@ -43,3 +44,6 @@ training:
 
   logging:
     log_every_n_steps: 10
+  diagnostics:
+    enabled: true
+    max_batches: 80

@@ -180,6 +180,8 @@ def _tokenize_split(
 
     return tokenized_split
 
+
+
 def _validate_tokenized_supervision(
     tokenized_dataset: TokenizedDataset,
 ) -> None:
@@ -200,7 +202,9 @@ def _validate_tokenized_supervision(
             "tokenized_dataset must be a dictionary."
         )
 
-    for split_name, samples in tokenized_dataset.items():
+    for split_name, samples in (
+        tokenized_dataset.items()
+    ):
 
         if not isinstance(
             samples,
@@ -231,7 +235,9 @@ def _validate_tokenized_supervision(
                     f"'{split_name}' is missing labels."
                 )
 
-            labels = sample["labels"]
+            labels = sample[
+                "labels"
+            ]
 
             if not isinstance(
                 labels,
@@ -241,6 +247,12 @@ def _validate_tokenized_supervision(
                     f"Labels for sample {index} in split "
                     f"'{split_name}' must be a list."
                 )
+
+            if not labels:
+                invalid_samples.append(
+                    index
+                )
+                continue
 
             valid_label_count = sum(
                 1
@@ -255,13 +267,15 @@ def _validate_tokenized_supervision(
 
         if invalid_samples:
 
-            preview = invalid_samples[:20]
+            preview = invalid_samples[
+                :20
+            ]
 
             raise ValueError(
                 f"Split '{split_name}' contains "
                 f"{len(invalid_samples)} samples with no "
                 f"valid supervised labels. "
-                f"All labels are -100. "
+                f"All label positions are -100. "
                 f"First invalid indices: {preview}"
             )
 
@@ -303,7 +317,7 @@ def get_tokenized_dataset(
     print_dataset_statistics(
         tokenized_dataset,
     )
-    
+
     _validate_tokenized_supervision(
         tokenized_dataset
     )
@@ -518,34 +532,84 @@ def _tokenize_sample(
     max_length: int,
 ) -> dict[str, Any]:
     """
-    Tokenize one training conversation.
+    Tokenize one training conversation while guaranteeing that
+    supervised answer tokens are retained.
+
+    The prompt is truncated from the left when necessary so that
+    the assistant answer remains available for causal-LM training.
     """
 
-    prompt_messages = (
-        _build_prompt_messages(
-            sample["messages"]
+    if not isinstance(
+        sample,
+        dict,
+    ):
+        raise TypeError(
+            "sample must be a dictionary."
         )
+
+    if not isinstance(
+        max_length,
+        int,
+    ) or max_length <= 0:
+        raise ValueError(
+            "max_length must be a positive integer."
+        )
+
+    if "messages" not in sample:
+        raise RuntimeError(
+            "Training sample is missing 'messages'."
+        )
+
+    prompt_messages = _build_prompt_messages(
+        sample["messages"]
     )
 
-    answer = (
-        _build_answer_message(
-            sample["messages"]
-        )
+    answer = _build_answer_message(
+        sample["messages"]
     )
 
-    prompt_ids = (
-        _tokenize_prompt(
-            tokenizer,
-            prompt_messages,
-        )
+    prompt_ids = _tokenize_prompt(
+        tokenizer=tokenizer,
+        prompt_messages=prompt_messages,
     )
 
-    answer_ids = (
-        _tokenize_answer(
-            tokenizer,
-            answer,
-        )
+    answer_ids = _tokenize_answer(
+        tokenizer=tokenizer,
+        answer=answer,
     )
+
+    if not answer_ids:
+        raise RuntimeError(
+            f"Training sample '{sample.get('id', 'unknown')}' "
+            "produced an empty assistant answer."
+        )
+
+    if tokenizer.eos_token_id is None:
+        raise RuntimeError(
+            "Tokenizer EOS token ID is required."
+        )
+
+    # The assistant answer is the supervised training target.
+    #
+    # We must guarantee that at least one answer token survives
+    # truncation. If the answer itself exceeds max_length, retain
+    # the beginning of the answer up to max_length.
+    if len(answer_ids) >= max_length:
+        answer_ids = answer_ids[:max_length]
+        prompt_ids = []
+
+    else:
+        available_prompt_length = (
+            max_length - len(answer_ids)
+        )
+
+        # Preserve the END of the prompt because it is closest to
+        # the assistant generation boundary and therefore retains
+        # the most relevant context when truncation is necessary.
+        if len(prompt_ids) > available_prompt_length:
+            prompt_ids = prompt_ids[
+                -available_prompt_length:
+            ]
 
     input_ids = (
         prompt_ids
@@ -553,27 +617,32 @@ def _tokenize_sample(
     )
 
     attention_mask = (
-        [1]
-        * len(input_ids)
+        [1] * len(input_ids)
     )
 
     labels = (
-        [-100]
-        * len(prompt_ids)
+        [-100] * len(prompt_ids)
         + answer_ids
     )
 
-    input_ids = input_ids[
-        :max_length
-    ]
+    if not input_ids:
+        raise RuntimeError(
+            f"Training sample '{sample.get('id', 'unknown')}' "
+            "produced an empty input sequence."
+        )
 
-    attention_mask = attention_mask[
-        :max_length
-    ]
+    valid_label_count = sum(
+        1
+        for label in labels
+        if label != -100
+    )
 
-    labels = labels[
-        :max_length
-    ]
+    if valid_label_count == 0:
+        raise RuntimeError(
+            f"Training sample '{sample.get('id', 'unknown')}' "
+            "contains no supervised answer tokens after "
+            "tokenization and truncation."
+        )
 
     padding = (
         max_length
@@ -583,43 +652,37 @@ def _tokenize_sample(
     if padding > 0:
 
         input_ids.extend(
-
-            [
-                tokenizer.pad_token_id
-            ]
-            * padding
-
+            [tokenizer.pad_token_id] * padding
         )
 
         attention_mask.extend(
-
-            [0]
-            * padding
-
+            [0] * padding
         )
 
         labels.extend(
+            [-100] * padding
+        )
 
-            [-100]
-            * padding
-
+    if not (
+        len(input_ids)
+        == len(attention_mask)
+        == len(labels)
+        == max_length
+    ):
+        raise RuntimeError(
+            f"Tokenized sample '{sample.get('id', 'unknown')}' "
+            "has inconsistent sequence lengths."
         )
 
     return {
-
         "id": sample["id"],
-
         "filename": sample["filename"],
-
         "messages": sample["messages"],
-
         "input_ids": input_ids,
-
         "attention_mask": attention_mask,
-
         "labels": labels,
-
     }
+
 
 def preview_training_labels(
     tokenizer: PreTrainedTokenizer,

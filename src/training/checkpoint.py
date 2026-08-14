@@ -1604,19 +1604,23 @@ def _cleanup_old_checkpoints(
                 "Failed to remove old checkpoint: "
                 f"{checkpoint_path}"
             ) from error
-
 def find_resume_checkpoint() -> Path | None:
     """
     Find the canonical latest checkpoint used for automatic
     training resumption.
 
-    The checkpoint location is resolved against the configured
-    Google Drive root when Drive synchronization is enabled.
-    Otherwise, the configured local checkpoint directory is used.
+    Resume is enabled when checkpoint.resume.enabled is True.
+    The optional checkpoint.resume.automatic flag is supported for
+    backward compatibility; when omitted, automatic resumption is
+    treated as enabled.
+
+    When Google Drive synchronization is enabled, the configured
+    checkpoint directory is resolved relative to the configured
+    Google Drive root directory.
 
     Returns:
-        The latest checkpoint path when automatic resume is enabled
-        and a valid checkpoint exists; otherwise None.
+        The validated latest checkpoint path when a resumable
+        checkpoint exists; otherwise None.
     """
 
     checkpoint_config = _get_checkpoint_config()
@@ -1633,24 +1637,50 @@ def find_resume_checkpoint() -> Path | None:
             "Checkpoint resume configuration must be a dictionary."
         )
 
-    if not resume_config.get(
+    resume_enabled = resume_config.get(
         "enabled",
         False,
+    )
+
+    if not isinstance(
+        resume_enabled,
+        bool,
     ):
+        raise RuntimeError(
+            "checkpoint.resume.enabled must be boolean."
+        )
+
+    if not resume_enabled:
+        print("=" * 80)
+        print("CHECKPOINT RESUME DISCOVERY")
+        print("=" * 80)
         print(
             "Resume Status      : RESUME DISABLED"
         )
+        print("=" * 80)
         return None
 
     automatic_resume = resume_config.get(
         "automatic",
-        False,
+        True,
     )
 
+    if not isinstance(
+        automatic_resume,
+        bool,
+    ):
+        raise RuntimeError(
+            "checkpoint.resume.automatic must be boolean."
+        )
+
     if not automatic_resume:
+        print("=" * 80)
+        print("CHECKPOINT RESUME DISCOVERY")
+        print("=" * 80)
         print(
             "Resume Status      : AUTOMATIC RESUME DISABLED"
         )
+        print("=" * 80)
         return None
 
     latest_directory_value = checkpoint_config.get(
@@ -1667,11 +1697,12 @@ def find_resume_checkpoint() -> Path | None:
         )
 
     latest_directory = Path(
-        latest_directory_value
+        latest_directory_value.strip()
     )
 
     drive_config = checkpoint_config.get(
-        "drive"
+        "drive",
+        {},
     )
 
     if not isinstance(
@@ -1705,7 +1736,6 @@ def find_resume_checkpoint() -> Path | None:
             drive_root_value,
             str,
         ) or not drive_root_value.strip():
-
             raise RuntimeError(
                 "checkpoint.drive.root_directory must be "
                 "a non-empty string when Drive integration "
@@ -1713,7 +1743,7 @@ def find_resume_checkpoint() -> Path | None:
             )
 
         drive_root = Path(
-            drive_root_value
+            drive_root_value.strip()
         )
 
         if not drive_root.exists():
@@ -1739,7 +1769,7 @@ def find_resume_checkpoint() -> Path | None:
             f"Drive Root         : {drive_root}"
         )
         print(
-            f"Latest Directory   : "
+            "Latest Directory   : "
             f"{resolved_latest_directory}"
         )
 
@@ -1753,14 +1783,28 @@ def find_resume_checkpoint() -> Path | None:
         print("CHECKPOINT RESUME DISCOVERY")
         print("=" * 80)
         print(
-            f"Local Directory    : "
+            "Local Directory    : "
             f"{resolved_latest_directory}"
         )
 
-    resolved_latest_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    if not resolved_latest_directory.exists():
+
+        print(
+            "Resume Status      : NO CHECKPOINT FOUND"
+        )
+        print(
+            "Searched Directory : "
+            f"{resolved_latest_directory}"
+        )
+        print("=" * 80)
+
+        return None
+
+    if not resolved_latest_directory.is_dir():
+        raise RuntimeError(
+            "Resolved latest checkpoint path is not a directory: "
+            f"{resolved_latest_directory}"
+        )
 
     latest_checkpoint = _find_latest_checkpoint(
         resolved_latest_directory
@@ -1772,7 +1816,7 @@ def find_resume_checkpoint() -> Path | None:
             "Resume Status      : NO CHECKPOINT FOUND"
         )
         print(
-            f"Searched Directory : "
+            "Searched Directory : "
             f"{resolved_latest_directory}"
         )
         print("=" * 80)
@@ -1804,7 +1848,7 @@ def find_resume_checkpoint() -> Path | None:
     )
 
     print(
-        f"Checkpoint Size    : "
+        "Checkpoint Size    : "
         f"{checkpoint_size / (1024 ** 2):.2f} MB"
     )
 
@@ -1814,10 +1858,7 @@ def find_resume_checkpoint() -> Path | None:
 
     print("=" * 80)
 
-    return latest_checkpoint
-
-
-    
+    return latest_checkpoint    
 def resume_from_checkpoint(
     checkpoint_path: Path,
     model: torch.nn.Module,

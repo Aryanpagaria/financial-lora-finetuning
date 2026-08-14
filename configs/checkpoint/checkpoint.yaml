@@ -1,39 +1,22 @@
 checkpoint:
-  root_directory: artifacts/checkpoints
-  latest_directory: artifacts/checkpoints/latest
-  best_directory: artifacts/best_model
-  lora_export_directory: artifacts/lora_adapter
-  state_directory: artifacts/checkpoints/state
+  root_directory: checkpoints
+  latest_directory: checkpoints/latest
+  best_directory: best_model
+  lora_export_directory: lora_adapter
+  state_directory: checkpoints/state
 
   save_strategy: epoch
   save_every_n_epochs: 1
 
-  save_optimizer_state: true
-  save_scheduler_state: true
-  save_training_state: true
-  save_rng_state: true
-  save_model_state: true
-  save_tokenizer: true
-  save_config: true
-
   resume:
     enabled: true
-    automatic: true
-    checkpoint_directory: artifacts/checkpoints/latest
     strict: true
-    restore_model: true
-    restore_optimizer: true
-    restore_scheduler: true
-    restore_epoch: true
-    restore_global_step: true
-    restore_best_metric: true
-    restore_rng_state: true
 
   best_model:
     enabled: true
     metric: validation_loss
     mode: min
-    save_only_best: false
+    save_only_best: true
 
   retention:
     enabled: true

@@ -62,14 +62,27 @@ def _get_checkpoint_config() -> dict[str, Any]:
 
     return checkpoint_config
 
-
 def _create_checkpoint_directories(
     checkpoint_config: dict[str, Any],
 ) -> dict[str, Path]:
     """
-    Create and return all directories required by
-    the checkpoint system.
+    Create only the directories required by the checkpoint system.
+
+    The checkpoint root, latest checkpoint directory, best-model
+    directory, LoRA export directory, and state directory are all
+    resolved from configuration.
+
+    Directory creation is centralized here so no checkpoint function
+    can accidentally create an alternative artifact hierarchy.
     """
+
+    if not isinstance(
+        checkpoint_config,
+        dict,
+    ):
+        raise TypeError(
+            "checkpoint_config must be a dictionary."
+        )
 
     directory_keys = {
         "root": "root_directory",
@@ -92,13 +105,15 @@ def _create_checkpoint_directories(
             str,
         ):
             raise RuntimeError(
-                f"Checkpoint configuration "
+                "Checkpoint configuration "
                 f"'{config_key}' must be a string."
             )
 
-        if not configured_path.strip():
+        configured_path = configured_path.strip()
+
+        if not configured_path:
             raise RuntimeError(
-                f"Checkpoint configuration "
+                "Checkpoint configuration "
                 f"'{config_key}' cannot be empty."
             )
 
@@ -106,10 +121,22 @@ def _create_checkpoint_directories(
             configured_path
         )
 
+        if directory.is_file():
+            raise RuntimeError(
+                "Checkpoint directory path points to an "
+                f"existing file: {directory}"
+            )
+
         directory.mkdir(
             parents=True,
             exist_ok=True,
         )
+
+        if not directory.is_dir():
+            raise RuntimeError(
+                "Checkpoint directory could not be created "
+                f"or verified: {directory}"
+            )
 
         directories[
             directory_name
@@ -1579,14 +1606,16 @@ def _cleanup_old_checkpoints(
             ) from error
 
 
+
 def find_resume_checkpoint() -> Path | None:
     """
-    Find the latest valid checkpoint configured for
-    automatic training resumption.
+    Find the canonical latest checkpoint used for automatic
+    training resumption.
 
-    Returns:
-        The latest valid checkpoint path, or None when
-        no resumable checkpoint exists.
+    The latest checkpoint is always resolved from the configured
+    latest_directory. Resume configuration controls whether
+    automatic resumption is enabled, but does not define a second
+    checkpoint storage location.
     """
 
     checkpoint_config = _get_checkpoint_config()
@@ -1595,33 +1624,39 @@ def find_resume_checkpoint() -> Path | None:
         "resume"
     ]
 
-    if not resume_config["enabled"]:
+    if not isinstance(
+        resume_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Checkpoint resume configuration must be a dictionary."
+        )
+
+    if not resume_config.get(
+        "enabled",
+        False,
+    ):
         return None
 
-    checkpoint_directory = Path(
-        resume_config[
-            "checkpoint_directory"
+    latest_directory = Path(
+        checkpoint_config[
+            "latest_directory"
         ]
     )
 
-    checkpoint_directory.mkdir(
+    latest_directory.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    latest_checkpoint = (
-        _find_latest_checkpoint(
-            checkpoint_directory
-        )
+    latest_checkpoint = _find_latest_checkpoint(
+        latest_directory
     )
 
     if latest_checkpoint is None:
         return None
 
     return latest_checkpoint
-
-
-
 
 
 def resume_from_checkpoint(

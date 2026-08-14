@@ -1703,13 +1703,44 @@ def _save_epoch_checkpoint(
     full_config: dict[str, Any],
 ) -> None:
     """
-    Save the current training state when checkpointing is enabled.
+    Persist the completed epoch through the checkpoint subsystem.
 
-    The complete effective project configuration is stored so that
-    future resume operations can detect incompatible changes to
-    model, LoRA, optimizer, scheduler, precision, and data-shape
-    settings.
+    The trainer provides the current training state.
+    checkpoint.py owns the actual persistence policy, paths,
+    retention, latest-checkpoint handling, and external synchronization.
     """
+
+    if not isinstance(
+        model,
+        torch.nn.Module,
+    ):
+        raise TypeError(
+            "model must be a torch.nn.Module."
+        )
+
+    if not isinstance(
+        optimizer,
+        torch.optim.Optimizer,
+    ):
+        raise TypeError(
+            "optimizer must be a torch optimizer."
+        )
+
+    if not isinstance(
+        scheduler,
+        torch.optim.lr_scheduler.LRScheduler,
+    ):
+        raise TypeError(
+            "scheduler must be a PyTorch learning-rate scheduler."
+        )
+
+    if not isinstance(
+        state,
+        dict,
+    ):
+        raise TypeError(
+            "state must be a dictionary."
+        )
 
     if not isinstance(
         full_config,
@@ -1728,7 +1759,7 @@ def _save_epoch_checkpoint(
         dict,
     ):
         raise RuntimeError(
-            "Full configuration does not contain "
+            "Project configuration does not contain "
             "a valid checkpoint configuration."
         )
 
@@ -1737,9 +1768,42 @@ def _save_epoch_checkpoint(
     )
 
     if save_strategy == "none":
+        print(
+            "Checkpoint Saving   : DISABLED"
+        )
         return
 
-    save_checkpoint(
+    if save_strategy != "epoch":
+        raise ValueError(
+            "Unsupported checkpoint save strategy: "
+            f"{save_strategy!r}"
+        )
+
+    if "epoch" not in state:
+        raise RuntimeError(
+            "Training state is missing the epoch."
+        )
+
+    if "global_step" not in state:
+        raise RuntimeError(
+            "Training state is missing global_step."
+        )
+
+    print("=" * 80)
+    print("SAVING EPOCH CHECKPOINT")
+    print("=" * 80)
+
+    print(
+        f"Epoch              : "
+        f"{int(state['epoch'])}"
+    )
+
+    print(
+        f"Global Step        : "
+        f"{int(state['global_step']):,}"
+    )
+
+    checkpoint_path = save_checkpoint(
         model=model,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -1754,6 +1818,19 @@ def _save_epoch_checkpoint(
         ),
         training_config=full_config,
     )
+
+    if checkpoint_path is None:
+        raise RuntimeError(
+            "save_checkpoint() did not return a checkpoint path."
+        )
+
+    print(
+        f"Checkpoint Saved    : {checkpoint_path}"
+    )
+
+    print("=" * 80)
+
+
 
 
 
@@ -2250,7 +2327,6 @@ def _train_epoch(
     )
 
 
-
 def _resume_training_state(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -2260,10 +2336,37 @@ def _resume_training_state(
     """
     Restore training state from the latest valid checkpoint.
 
-    Resume compatibility is checked against the complete current
-    project configuration before model, optimizer, scheduler, and
-    RNG state are restored.
+    If checkpoint resume is disabled or no valid checkpoint exists,
+    return a fresh training state.
+
+    The checkpoint subsystem is responsible for validating checkpoint
+    compatibility and restoring model, optimizer, scheduler, RNG, and
+    training metadata according to the configured resume policy.
     """
+
+    if not isinstance(
+        model,
+        torch.nn.Module,
+    ):
+        raise TypeError(
+            "model must be a torch.nn.Module."
+        )
+
+    if not isinstance(
+        optimizer,
+        torch.optim.Optimizer,
+    ):
+        raise TypeError(
+            "optimizer must be a torch optimizer."
+        )
+
+    if not isinstance(
+        scheduler,
+        torch.optim.lr_scheduler.LRScheduler,
+    ):
+        raise TypeError(
+            "scheduler must be a PyTorch learning-rate scheduler."
+        )
 
     if not isinstance(
         full_config,
@@ -2273,17 +2376,104 @@ def _resume_training_state(
             "full_config must be a dictionary."
         )
 
-    checkpoint_path = find_resume_checkpoint()
+    checkpoint_config = full_config.get(
+        "checkpoint"
+    )
 
-    if checkpoint_path is None:
-        return _create_training_state()
+    if not isinstance(
+        checkpoint_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Project configuration does not contain "
+            "a valid checkpoint configuration."
+        )
+
+    resume_config = checkpoint_config.get(
+        "resume"
+    )
+
+    if not isinstance(
+        resume_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "checkpoint.resume must be a dictionary."
+        )
+
+    resume_enabled = resume_config.get(
+        "enabled",
+        False,
+    )
+
+    automatic_resume = resume_config.get(
+        "automatic",
+        False,
+    )
+
+    if not isinstance(
+        resume_enabled,
+        bool,
+    ):
+        raise TypeError(
+            "checkpoint.resume.enabled must be boolean."
+        )
+
+    if not isinstance(
+        automatic_resume,
+        bool,
+    ):
+        raise TypeError(
+            "checkpoint.resume.automatic must be boolean."
+        )
 
     print("=" * 80)
-    print("RESUMING TRAINING")
+    print("CHECKPOINT RESUME VALIDATION")
     print("=" * 80)
 
     print(
-        f"Checkpoint : {checkpoint_path}"
+        f"Resume Enabled     : {resume_enabled}"
+    )
+
+    print(
+        f"Automatic Resume   : {automatic_resume}"
+    )
+
+    if not resume_enabled:
+        print(
+            "Resume Status      : DISABLED"
+        )
+        print("=" * 80)
+
+        return _create_training_state()
+
+    if not automatic_resume:
+        print(
+            "Resume Status      : AUTOMATIC RESUME DISABLED"
+        )
+        print("=" * 80)
+
+        return _create_training_state()
+
+    checkpoint_path = find_resume_checkpoint()
+
+    if checkpoint_path is None:
+        print(
+            "Resume Status      : NO CHECKPOINT FOUND"
+        )
+        print(
+            "Training Mode      : FRESH TRAINING"
+        )
+        print("=" * 80)
+
+        return _create_training_state()
+
+    print(
+        "Resume Status      : CHECKPOINT FOUND"
+    )
+
+    print(
+        f"Checkpoint         : {checkpoint_path}"
     )
 
     checkpoint_state = resume_from_checkpoint(
@@ -2294,22 +2484,113 @@ def _resume_training_state(
         current_training_config=full_config,
     )
 
-    restored_epoch = int(
-        checkpoint_state["epoch"]
+    if not isinstance(
+        checkpoint_state,
+        dict,
+    ):
+        raise RuntimeError(
+            "resume_from_checkpoint() must return "
+            "a training-state dictionary."
+        )
+
+    required_state_keys = {
+        "epoch",
+        "global_step",
+        "best_metric",
+    }
+
+    missing_state_keys = sorted(
+        required_state_keys
+        - set(checkpoint_state.keys())
     )
 
-    restored_global_step = int(
-        checkpoint_state["global_step"]
-    )
+    if missing_state_keys:
+        raise RuntimeError(
+            "Checkpoint is missing required training-state "
+            f"fields: {missing_state_keys}"
+        )
+
+    restored_epoch = checkpoint_state[
+        "epoch"
+    ]
+
+    restored_global_step = checkpoint_state[
+        "global_step"
+    ]
 
     restored_best_metric = checkpoint_state[
         "best_metric"
     ]
 
+    if not isinstance(
+        restored_epoch,
+        int,
+    ) or restored_epoch < 0:
+        raise RuntimeError(
+            "Restored checkpoint epoch must be "
+            "a non-negative integer."
+        )
+
+    if not isinstance(
+        restored_global_step,
+        int,
+    ) or restored_global_step < 0:
+        raise RuntimeError(
+            "Restored checkpoint global_step must be "
+            "a non-negative integer."
+        )
+
+    if (
+        restored_best_metric is not None
+        and not isinstance(
+            restored_best_metric,
+            (int, float),
+        )
+    ):
+        raise RuntimeError(
+            "Restored checkpoint best_metric must be "
+            "numeric or None."
+        )
+
+    training_config = full_config.get(
+        "training"
+    )
+
+    if not isinstance(
+        training_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Project configuration does not contain "
+            "a valid training configuration."
+        )
+
+    total_epochs = training_config.get(
+        "epochs"
+    )
+
+    if not isinstance(
+        total_epochs,
+        int,
+    ) or total_epochs <= 0:
+        raise RuntimeError(
+            "training.epochs must be a positive integer."
+        )
+
+    if restored_epoch > total_epochs:
+        raise RuntimeError(
+            "Checkpoint epoch exceeds configured training "
+            f"epochs: {restored_epoch} > {total_epochs}"
+        )
+
     state = _create_training_state(
         start_epoch=restored_epoch,
         global_step=restored_global_step,
-        best_metric=restored_best_metric,
+        best_metric=(
+            None
+            if restored_best_metric is None
+            else float(restored_best_metric)
+        ),
     )
 
     print(
@@ -2317,12 +2598,33 @@ def _resume_training_state(
     )
 
     print(
-        f"Resumed Global Step: {restored_global_step}"
+        f"Next Epoch         : "
+        f"{restored_epoch + 1}"
     )
 
     print(
-        f"Best Metric        : {restored_best_metric}"
+        f"Target Epochs      : "
+        f"{total_epochs}"
     )
+
+    print(
+        f"Resumed Global Step: "
+        f"{restored_global_step:,}"
+    )
+
+    print(
+        f"Best Metric        : "
+        f"{restored_best_metric}"
+    )
+
+    if restored_epoch == total_epochs:
+        print(
+            "Resume Status      : TRAINING ALREADY COMPLETE"
+        )
+    else:
+        print(
+            "Resume Status      : READY TO CONTINUE"
+        )
 
     print("=" * 80)
 
@@ -2338,9 +2640,42 @@ def _save_best_model_if_improved(
     previous_best_metric: float | None,
 ) -> None:
     """
-    Save a best-model checkpoint when the current validation
-    loss improves over the previous best value.
+    Save the model as the best checkpoint when validation loss improves.
+
+    Lower validation loss is considered better.
     """
+
+    if not isinstance(
+        model,
+        torch.nn.Module,
+    ):
+        raise TypeError(
+            "model must be a torch.nn.Module."
+        )
+
+    if not isinstance(
+        optimizer,
+        torch.optim.Optimizer,
+    ):
+        raise TypeError(
+            "optimizer must be a torch optimizer."
+        )
+
+    if not isinstance(
+        scheduler,
+        torch.optim.lr_scheduler.LRScheduler,
+    ):
+        raise TypeError(
+            "scheduler must be a PyTorch learning-rate scheduler."
+        )
+
+    if not isinstance(
+        state,
+        dict,
+    ):
+        raise TypeError(
+            "state must be a dictionary."
+        )
 
     if not isinstance(
         full_config,
@@ -2349,6 +2684,40 @@ def _save_best_model_if_improved(
         raise TypeError(
             "full_config must be a dictionary."
         )
+
+    checkpoint_config = full_config.get(
+        "checkpoint"
+    )
+
+    if not isinstance(
+        checkpoint_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Project configuration does not contain "
+            "a valid checkpoint configuration."
+        )
+
+    best_model_config = checkpoint_config.get(
+        "best_model"
+    )
+
+    if not isinstance(
+        best_model_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "checkpoint.best_model must be a dictionary."
+        )
+
+    if not best_model_config.get(
+        "enabled",
+        False,
+    ):
+        print(
+            "Best Model Saving   : DISABLED"
+        )
+        return
 
     current_validation_loss = state.get(
         "validation_loss"
@@ -2367,19 +2736,45 @@ def _save_best_model_if_improved(
 
     if not torch.isfinite(
         torch.tensor(
-            float(current_validation_loss)
+            float(current_validation_loss),
+            dtype=torch.float64,
         )
     ):
         raise FloatingPointError(
             "Current validation loss is non-finite."
         )
 
-    if not _is_best_validation_loss(
+    if previous_best_metric is not None:
+        if not isinstance(
+            previous_best_metric,
+            (int, float),
+        ):
+            raise TypeError(
+                "previous_best_metric must be numeric or None."
+            )
+
+        if not torch.isfinite(
+            torch.tensor(
+                float(previous_best_metric),
+                dtype=torch.float64,
+            )
+        ):
+            raise FloatingPointError(
+                "previous_best_metric is non-finite."
+            )
+
+    is_improved = _is_best_validation_loss(
         validation_loss=float(
             current_validation_loss
         ),
         best_metric=previous_best_metric,
-    ):
+    )
+
+    if not is_improved:
+        print(
+            f"Best Model         : NOT IMPROVED "
+            f"(validation_loss={current_validation_loss:.6f})"
+        )
         return
 
     best_path = save_best_checkpoint(
@@ -2398,9 +2793,37 @@ def _save_best_model_if_improved(
         training_config=full_config,
     )
 
+    if best_path is None:
+        raise RuntimeError(
+            "save_best_checkpoint() did not return "
+            "a checkpoint path."
+        )
+
+    print("=" * 80)
+    print("NEW BEST MODEL")
+    print("=" * 80)
+
     print(
-        f"Best Checkpoint    : {best_path}"
+        f"Epoch              : "
+        f"{int(state['epoch'])}"
     )
+
+    print(
+        f"Validation Loss    : "
+        f"{float(current_validation_loss):.6f}"
+    )
+
+    print(
+        f"Previous Best      : "
+        f"{previous_best_metric}"
+    )
+
+    print(
+        f"Best Checkpoint    : "
+        f"{best_path}"
+    )
+
+    print("=" * 80)
 
 
 def _train_all_epochs(
@@ -3174,6 +3597,8 @@ def _prepare_training_pipeline(
         device,
     )
 
+
+
 def train(
     tokenized_dataset: dict[
         str,
@@ -3183,13 +3608,10 @@ def train(
     """
     Execute the complete QLoRA training pipeline.
 
-    The trainer consumes already-tokenized dataset splits and
-    coordinates model construction, optimizer construction,
-    scheduler construction, checkpoint resumption, training,
-    validation, best-checkpoint handling, and finalization.
-
-    Evaluation and inference are intentionally outside this
-    function and are implemented by their dedicated modules.
+    The trainer coordinates dataset construction, model creation,
+    optimizer and scheduler construction, checkpoint resume,
+    training, validation, checkpoint persistence, best-model
+    tracking, and finalization.
     """
 
     if not isinstance(
@@ -3223,9 +3645,75 @@ def train(
             "a valid training configuration."
         )
 
+    checkpoint_config = full_config.get(
+        "checkpoint"
+    )
+
+    if not isinstance(
+        checkpoint_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "Project configuration does not contain "
+            "a valid checkpoint configuration."
+        )
+
     _validate_training_config(
         training_config
     )
+
+    print("=" * 80)
+    print("CHECKPOINT CONFIGURATION")
+    print("=" * 80)
+
+    print(
+        f"Save Strategy      : "
+        f"{checkpoint_config.get('save_strategy')}"
+    )
+
+    print(
+        f"Root Directory     : "
+        f"{checkpoint_config.get('root_directory')}"
+    )
+
+    print(
+        f"Latest Directory   : "
+        f"{checkpoint_config.get('latest_directory')}"
+    )
+
+    print(
+        f"Best Directory     : "
+        f"{checkpoint_config.get('best_directory')}"
+    )
+
+    print(
+        f"LoRA Export        : "
+        f"{checkpoint_config.get('lora_export_directory')}"
+    )
+
+    resume_config = checkpoint_config.get(
+        "resume"
+    )
+
+    if not isinstance(
+        resume_config,
+        dict,
+    ):
+        raise RuntimeError(
+            "checkpoint.resume must be a dictionary."
+        )
+
+    print(
+        f"Resume Enabled     : "
+        f"{resume_config.get('enabled')}"
+    )
+
+    print(
+        f"Automatic Resume   : "
+        f"{resume_config.get('automatic')}"
+    )
+
+    print("=" * 80)
 
     torch_datasets = _build_torch_datasets(
         tokenized_dataset
@@ -3246,7 +3734,9 @@ def train(
         device,
     ) = _prepare_training_pipeline(
         training_config=training_config,
-        dataloader_length=len(train_dataloader),
+        dataloader_length=len(
+            train_dataloader
+        ),
     )
 
     state = _resume_training_state(
@@ -3255,6 +3745,33 @@ def train(
         scheduler=scheduler,
         full_config=full_config,
     )
+
+    total_epochs = int(
+        training_config["epochs"]
+    )
+
+    if int(state["epoch"]) >= total_epochs:
+        print("=" * 80)
+        print("TRAINING ALREADY COMPLETE")
+        print("=" * 80)
+        print(
+            f"Completed Epochs   : "
+            f"{int(state['epoch'])}"
+        )
+        print(
+            f"Configured Epochs  : "
+            f"{total_epochs}"
+        )
+        print(
+            "No additional training epochs are required."
+        )
+        print("=" * 80)
+
+        return _finalize_training(
+            model=model,
+            state=state,
+            training_config=training_config,
+        )
 
     state = _train_all_epochs(
         model=model,
@@ -3275,8 +3792,6 @@ def train(
     )
 
     return state
-
-
 
 
 def main() -> None:

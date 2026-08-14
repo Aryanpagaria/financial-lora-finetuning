@@ -10,6 +10,7 @@ checkpoint:
 
   resume:
     enabled: true
+    checkpoint_directory: checkpoints/latest
     strict: true
 
   best_model:

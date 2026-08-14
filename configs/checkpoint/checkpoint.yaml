@@ -29,9 +29,12 @@ checkpoint:
   drive:
     enabled: true
     root_directory: /content/drive/MyDrive/financial-lora-finetuning
+
     sync_epoch_checkpoints: true
     sync_latest_checkpoint: true
     sync_best_checkpoint: true
     sync_lora_adapter: true
     sync_tokenizer: true
+    sync_logs: true
+
     verify_after_copy: true

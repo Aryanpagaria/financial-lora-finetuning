@@ -10,6 +10,7 @@ checkpoint:
 
   resume:
     enabled: true
+    automatic: true
     checkpoint_directory: checkpoints/latest
     strict: true
 
@@ -33,5 +34,4 @@ checkpoint:
     sync_best_checkpoint: true
     sync_lora_adapter: true
     sync_tokenizer: true
-    sync_logs: true
     verify_after_copy: true

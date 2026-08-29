@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from transformers import PreTrainedTokenizerBase
 import copy
 import random
 import time
@@ -1748,33 +1748,74 @@ def interactive_chat(
                 f"{type(error).__name__}: {error}"
             )
 
-
-class _TestTokenizer:
+class _TestTokenizer(PreTrainedTokenizerBase):
     """
     Minimal local tokenizer substitute used only by the isolated
     inference subsystem test.
 
-    It does not load a model or access the Hugging Face Hub.
+    This tokenizer implements the minimum Hugging Face tokenizer
+    contract required by the production inference functions while
+    remaining completely local and deterministic.
     """
+
+    model_input_names = [
+        "input_ids",
+        "attention_mask",
+    ]
+
+    pad_token = "<pad>"
+    eos_token = "<eos>"
+    unk_token = "<unk>"
 
     pad_token_id = 0
     eos_token_id = 1
+    unk_token_id = 2
+
+    def __init__(
+        self,
+        **kwargs: Any,
+    ) -> None:
+
+        super().__init__(
+            pad_token=self.pad_token,
+            eos_token=self.eos_token,
+            unk_token=self.unk_token,
+            **kwargs,
+        )
 
     def __call__(
         self,
         prompt: str,
-        return_tensors: str,
-        padding: bool,
-        truncation: bool,
+        return_tensors: str | None = None,
+        padding: bool = False,
+        truncation: bool = False,
+        **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
 
-        del return_tensors
         del padding
         del truncation
+        del kwargs
+
+        if not isinstance(
+            prompt,
+            str,
+        ):
+            raise TypeError(
+                "Test tokenizer prompt must be a string."
+            )
 
         if not prompt.strip():
             raise ValueError(
                 "Test tokenizer received an empty prompt."
+            )
+
+        if return_tensors not in {
+            None,
+            "pt",
+        }:
+            raise ValueError(
+                "Test tokenizer only supports "
+                "return_tensors='pt'."
             )
 
         token_count = max(
@@ -1784,31 +1825,109 @@ class _TestTokenizer:
             ),
         )
 
+        input_ids = torch.ones(
+            (
+                1,
+                token_count,
+            ),
+            dtype=torch.long,
+        )
+
+        attention_mask = torch.ones(
+            (
+                1,
+                token_count,
+            ),
+            dtype=torch.long,
+        )
+
         return {
-            "input_ids": torch.ones(
-                (1, token_count),
-                dtype=torch.long,
-            ),
-            "attention_mask": torch.ones(
-                (1, token_count),
-                dtype=torch.long,
-            ),
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
         }
 
     def decode(
         self,
         token_ids: torch.Tensor,
-        skip_special_tokens: bool,
-        clean_up_tokenization_spaces: bool,
+        skip_special_tokens: bool = True,
+        clean_up_tokenization_spaces: bool = True,
+        **kwargs: Any,
     ) -> str:
 
-        del token_ids
         del skip_special_tokens
         del clean_up_tokenization_spaces
+        del kwargs
+
+        if not isinstance(
+            token_ids,
+            torch.Tensor,
+        ):
+            raise TypeError(
+                "Test tokenizer token_ids must be a torch.Tensor."
+            )
+
+        if token_ids.numel() == 0:
+            raise ValueError(
+                "Test tokenizer cannot decode an empty tensor."
+            )
 
         return "test response"
 
+    def _convert_token_to_id(
+        self,
+        token: str,
+    ) -> int:
 
+        if token == self.pad_token:
+            return self.pad_token_id
+
+        if token == self.eos_token:
+            return self.eos_token_id
+
+        if token == self.unk_token:
+            return self.unk_token_id
+
+        return self.unk_token_id
+
+    def _convert_id_to_token(
+        self,
+        index: int,
+    ) -> str:
+
+        if index == self.pad_token_id:
+            return self.pad_token
+
+        if index == self.eos_token_id:
+            return self.eos_token
+
+        if index == self.unk_token_id:
+            return self.unk_token
+
+        return self.unk_token
+
+    def get_vocab(
+        self,
+    ) -> dict[str, int]:
+
+        return {
+            self.pad_token: self.pad_token_id,
+            self.eos_token: self.eos_token_id,
+            self.unk_token: self.unk_token_id,
+        }
+
+    def build_inputs_with_special_tokens(
+        self,
+        token_ids_0: list[int],
+        token_ids_1: list[int] | None = None,
+    ) -> list[int]:
+
+        if token_ids_1 is None:
+            return list(token_ids_0)
+
+        return [
+            *token_ids_0,
+            *token_ids_1,
+        ]
 class _TestGenerationModel(
     torch.nn.Module
 ):

@@ -13,6 +13,7 @@ inference:
     repetition_penalty: 1.0
     no_repeat_ngram_size: 0
     early_stopping: true
+    use_cache: true
 
   chat:
     enabled: true

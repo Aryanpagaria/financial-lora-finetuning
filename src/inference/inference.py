@@ -5,7 +5,7 @@ import random
 import time
 from pathlib import Path
 from typing import Any
-
+from collections.abc import Mapping
 import numpy as np
 import torch
 from peft import PeftModel
@@ -1126,10 +1126,10 @@ def _prepare_generation_inputs(
 
     if not isinstance(
         encoded,
-        dict,
+        Mapping,
     ):
         raise TypeError(
-            "Tokenizer output must be a dictionary."
+            "Tokenizer output must be a mapping."
         )
 
     prepared_inputs: dict[

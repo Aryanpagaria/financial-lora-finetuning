@@ -1031,14 +1031,7 @@ def _build_prompt(
     native chat-template prompt.
     """
 
-    if not isinstance(
-        tokenizer,
-        PreTrainedTokenizerBase,
-    ):
-        raise TypeError(
-            "tokenizer must be a "
-            "PreTrainedTokenizerBase."
-        )
+   
 
     if not isinstance(
         messages,

@@ -1073,7 +1073,6 @@ def _build_prompt(
 
     return prompt
 
-
 def _prepare_generation_inputs(
     tokenizer: PreTrainedTokenizerBase,
     prompt: str,
@@ -1129,7 +1128,8 @@ def _prepare_generation_inputs(
         Mapping,
     ):
         raise TypeError(
-            "Tokenizer output must be a mapping."
+            "Tokenizer output must implement the "
+            "mapping interface."
         )
 
     prepared_inputs: dict[
@@ -1172,8 +1172,6 @@ def _prepare_generation_inputs(
         )
 
     return prepared_inputs
-
-
 def _build_generation_kwargs(
     config: InferenceConfig,
     tokenizer: PreTrainedTokenizerBase,

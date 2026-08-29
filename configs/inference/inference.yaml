@@ -18,6 +18,10 @@ inference:
   chat:
     enabled: true
     max_history: 10
+    exit_commands:
+    - "exit"
+    - "quit"
+    - "q"
 
   reproducibility:
     seed: 42

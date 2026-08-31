@@ -1,4 +1,4 @@
-# Financial LoRA Fine-Tuning
+# QLoRA  FinQA LLM-Pipeline
 
 > A reproducible, production-oriented QLoRA fine-tuning pipeline for
 > financial question answering using **Qwen2.5-3B-Instruct**, 4-bit NF4
